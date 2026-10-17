@@ -8,13 +8,14 @@ import time
 import traceback
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QKeySequence, QTextCursor, QTextFormat
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox,
-                               QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
-                               QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QTableWidget,
-                               QTableWidgetItem, QTabWidget, QTextEdit, QToolBar, QTreeWidget, QTreeWidgetItem,
-                               QVBoxLayout, QWidget)
+from PySide6.QtCore import QEvent, QRect, QSettings, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QAction, QActionGroup, QColor, QKeySequence, QTextCursor, QTextFormat
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout,
+                               QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu,
+                               QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QStyle,
+                               QStyledItemDelegate, QStyleOptionViewItem, QTableWidget,
+                               QTableWidgetItem, QTabWidget, QTextEdit, QToolBar, QToolButton, QTreeWidget,
+                               QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .. import __version__, batch, heuristics, library, preprocess
 from ..formats import REGISTRY
@@ -26,6 +27,9 @@ from .batch_dialog import BatchDialog
 from .hexview import HexView, Inspector, mono_font
 from .header_dialog import HeaderDialog
 from .rule_dialog import RuleDialog
+from .theme import DEFAULT as DEFAULT_THEME
+from .theme import TITLES as THEME_TITLES
+from .theme import apply_theme
 
 RULES_MODE = "__rules__"
 MAX_TEXT_LINES = 200_000
@@ -90,6 +94,49 @@ class AnalyzeJob(QThread):
             self.done.emit(traceback.format_exc())
 
 
+class CenteredCheckDelegate(QStyledItemDelegate):
+    """Draws and toggles an item's check box in the middle of the cell (Qt puts it at the left)."""
+
+    def _check_rect(self, option, index) -> QRect:
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        style = opt.widget.style() if opt.widget else QApplication.style()
+        r = style.subElementRect(QStyle.SE_ItemViewItemCheckIndicator, opt, opt.widget)
+        r.moveCenter(option.rect.center())
+        return r
+
+    def paint(self, painter, option, index) -> None:
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        style = opt.widget.style() if opt.widget else QApplication.style()
+        checked = opt.checkState == Qt.Checked
+        opt.features &= ~QStyleOptionViewItem.HasCheckIndicator
+        opt.text = ""
+        style.drawControl(QStyle.CE_ItemViewItem, opt, painter, opt.widget)  # background and selection
+        box = QStyleOptionViewItem(opt)
+        box.rect = self._check_rect(option, index)
+        box.state = (opt.state & ~QStyle.State_HasFocus) | (QStyle.State_On if checked else QStyle.State_Off)
+        style.drawPrimitive(QStyle.PE_IndicatorItemViewItemCheck, box, painter, opt.widget)
+
+    def editorEvent(self, event, model, option, index) -> bool:
+        if not (index.flags() & Qt.ItemIsUserCheckable and index.flags() & Qt.ItemIsEnabled):
+            return False
+        t = event.type()
+        if t in (QEvent.MouseButtonRelease, QEvent.MouseButtonDblClick):
+            if event.button() != Qt.LeftButton or not self._check_rect(option, index).contains(event.position().toPoint()):
+                return False
+            if t == QEvent.MouseButtonDblClick:
+                return True  # swallow, like the default delegate
+        elif t == QEvent.KeyPress:
+            if event.key() not in (Qt.Key_Space, Qt.Key_Select):
+                return False
+        else:
+            return False
+        checked = Qt.CheckState(index.data(Qt.CheckStateRole) or 0) == Qt.Checked  # data() may give a plain int
+        state = Qt.Unchecked if checked else Qt.Checked
+        return model.setData(index, state, Qt.CheckStateRole)
+
+
 def _ro_item(text, data=None) -> QTableWidgetItem:
     it = QTableWidgetItem(str(text))
     it.setFlags(it.flags() & ~Qt.ItemIsEditable)
@@ -117,6 +164,7 @@ class MainWindow(QMainWindow):
         self._syncing = False
         self.report = None
         self.batch_dlg: BatchDialog | None = None
+        self.theme = apply_theme(QApplication.instance(), self.settings.value("theme", DEFAULT_THEME))
 
         self.setWindowTitle(f"BinaryToText {__version__}")
         self.setAcceptDrops(True)
@@ -176,7 +224,8 @@ class MainWindow(QMainWindow):
         tb.addWidget(self.pre)
         self.pre_arg = QLineEdit()
         self.pre_arg.setPlaceholderText("N / XOR 키")
-        self.pre_arg.setMaximumWidth(90)
+        self.pre_arg.setMinimumWidth(80)
+        self.pre_arg.setMaximumWidth(110)
         self.pre_arg.editingFinished.connect(self._apply_preprocess)
         tb.addWidget(self.pre_arg)
         tb.addSeparator()
@@ -259,6 +308,22 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(main)
         self.stats_label = QLabel()
         self.statusBar().addPermanentWidget(self.stats_label)
+        menu = QMenu(self)
+        group = QActionGroup(self)
+        self.theme_actions: dict[str, QAction] = {}
+        for key, title in THEME_TITLES.items():
+            a = menu.addAction(title)
+            a.setCheckable(True)
+            a.setChecked(key == self.theme)
+            a.triggered.connect(lambda *_, k=key: self.set_theme(k))
+            group.addAction(a)
+            self.theme_actions[key] = a
+        self.theme_btn = QToolButton()
+        self.theme_btn.setText("테마")
+        self.theme_btn.setToolTip("화면 색 테마 바꾸기")
+        self.theme_btn.setMenu(menu)
+        self.theme_btn.setPopupMode(QToolButton.InstantPopup)
+        self.statusBar().addPermanentWidget(self.theme_btn)
 
     def _build_rules_tab(self) -> QWidget:
         w = QWidget()
@@ -327,6 +392,7 @@ class MainWindow(QMainWindow):
         self.rule_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.rule_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.rule_table.verticalHeader().hide()
+        self.rule_table.setItemDelegateForColumn(0, CenteredCheckDelegate(self.rule_table))
         hh = self.rule_table.horizontalHeader()
         hh.setStretchLastSection(True)
         for c, wd in ((0, 40), (1, 80), (2, 110), (3, 110)):
@@ -1106,6 +1172,11 @@ class MainWindow(QMainWindow):
         off = self.an_strings.item(item.row(), 0).data(Qt.UserRole)
         if off is not None:
             self.hex.go_to(off)
+
+    def set_theme(self, key: str) -> None:
+        self.theme = apply_theme(QApplication.instance(), key)
+        self.theme_actions[self.theme].setChecked(True)
+        self.settings.setValue("theme", self.theme)
 
     # ------------------------------------------------------------ close
     def closeEvent(self, e) -> None:

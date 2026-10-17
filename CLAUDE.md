@@ -25,7 +25,7 @@ Run from this folder with the project venv.
 - `heuristics.py`: strings (ASCII/UTF-8/UTF-16/CP949), tag/rule suggestions, entropy, magic, record periods, format ranking (`FormatScore.score` penalises errors, 1-byte noise and many roots).
 - `preprocess.py`: stdlib-only transforms (decompress, base64, hex text, XOR, skip).
 - `render.py`: Node tree → text (optional `line_nodes` maps each line back to a node for GUI linking) or JSON.
-- `gui/`: `main_window.py` (decoding runs in `QThread`s with a generation counter; stale results are dropped), `hexview.py` (table-model hex view + inspector), `field_editor.py` (shared FieldSpec list editor), `rule_dialog.py` (rule editor with live preview), `header_dialog.py` (header/footer).
+- `gui/`: `main_window.py` (decoding runs in `QThread`s with a generation counter; stale results are dropped), `hexview.py` (table-model hex view + inspector), `field_editor.py` (shared FieldSpec list editor), `rule_dialog.py` (rule editor with live preview), `header_dialog.py` (header/footer), `theme.py` (color themes: one `Theme` color table → Fusion palette + stylesheet; styled combo/spin/check boxes lose native arrows and marks, so `theme.py` draws them as PNGs in the temp folder. Applied by `MainWindow` from the `theme` setting).
 
 ## User manual
 

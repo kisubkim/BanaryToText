@@ -230,3 +230,34 @@ def test_header_dialog(win):
     win.ruleset.header, win.ruleset.footer = dlg.header, dlg.footer
     win._rules_changed()
     assert "매직" in win.hf_label.text() and "CRC" in win.hf_label.text()
+
+
+def test_themes(win):
+    from binarytotext.gui.theme import DEFAULT, THEMES
+    app = QApplication.instance()
+    assert win.theme == DEFAULT
+    for key in [*THEMES, "system", DEFAULT]:
+        win.theme_actions[key].trigger()
+        app.processEvents()
+        assert win.theme == key and win.theme_actions[key].isChecked()
+        if key == "system":
+            assert app.styleSheet() == ""
+        else:
+            assert app.palette().window().color().name() == THEMES[key].bg
+    assert app.styleSheet() and win.settings.value("theme") == DEFAULT
+    win.set_theme("no-such-theme")  # unknown keys fall back to the default
+    assert win.theme == DEFAULT
+
+
+def test_rule_enable_checkbox_centered(win):
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+    t = win.rule_table
+    rect = t.visualRect(t.model().index(0, 0))
+    assert win.ruleset.rules[0].enabled
+    QTest.mouseClick(t.viewport(), Qt.LeftButton, pos=rect.center())  # middle of the cell toggles
+    assert not win.ruleset.rules[0].enabled
+    QTest.mouseClick(t.viewport(), Qt.LeftButton, pos=QPoint(rect.left() + 4, rect.center().y()))
+    assert not win.ruleset.rules[0].enabled  # the old left-edge spot is just a row click now
+    QTest.mouseClick(t.viewport(), Qt.LeftButton, pos=rect.center())
+    assert win.ruleset.rules[0].enabled

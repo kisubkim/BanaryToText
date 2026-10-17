@@ -139,6 +139,41 @@ def save(widget, name: str) -> None:
     print("saved", name)
 
 
+def theme_gallery(w) -> None:
+    """All themes side by side (3 columns), each a scaled-down shot of the main window."""
+    from PySide6.QtCore import QRect
+    from PySide6.QtGui import QColor, QFont, QPixmap
+
+    from binarytotext.gui.theme import DEFAULT, TITLES
+    cols, tw, th, cap, gap = 3, 520, 293, 26, 12
+    keys = list(TITLES)
+    rows = (len(keys) + cols - 1) // cols
+    out = QPixmap(cols * tw + (cols + 1) * gap, rows * (th + cap) + (rows + 1) * gap)
+    out.fill(QColor("#ffffff"))
+    p = QPainter(out)
+    p.setRenderHint(QPainter.SmoothPixmapTransform)
+    font = QFont(app.font())
+    font.setPointSize(11)
+    font.setBold(True)
+    p.setFont(font)
+    for i, key in enumerate(keys):
+        w.set_theme(key)
+        settle(0.5)
+        shot = w.grab().scaled(tw, th, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        x = gap + (i % cols) * (tw + gap)
+        y = gap + (i // cols) * (th + cap + gap)
+        p.setPen(QColor("#333333"))
+        p.drawText(QRect(x, y, tw, cap), Qt.AlignLeft | Qt.AlignVCenter, TITLES[key])
+        p.drawPixmap(x, y + cap, shot)
+        p.setPen(QColor("#bbbbbb"))
+        p.drawRect(x, y + cap, tw - 1, th - 1)
+    p.end()
+    out.save(str(IMAGES / "22_themes.png"))
+    print("saved 22_themes.png")
+    w.set_theme(DEFAULT)
+    settle()
+
+
 def main() -> None:
     global app
     write_samples()
@@ -164,6 +199,7 @@ def main() -> None:
     w.open_file(str(SAMPLES / "sensor_01.bin"))
     wait(lambda: w.result is not None and "Sensor-B" in w.text.toPlainText())
     save(w, "02_main_decoded.png")  # status bar still shows the auto-selection message
+    theme_gallery(w)
 
     # 3. Panels
     w.hex.go_to(0x10)
