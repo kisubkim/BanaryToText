@@ -83,3 +83,17 @@ def test_rule_dialog_preview(win, tmp_path):
     dlg.tag.setText("10")
     dlg.f_fmt.setCurrentIndex(dlg.f_fmt.findData("hex"))
     assert "0x1234" in dlg.preview.toPlainText()
+
+
+def test_rule_dialog_end_tag(win):
+    from binarytotext.gui.rule_dialog import RuleDialog
+    from binarytotext.rules import Rule
+    data = bytes.fromhex("0B 09 61 00 00")
+    dlg = RuleDialog(win, Rule("0B", "객체", "open", bracket="{"), win.ruleset, data)
+    assert dlg.end_tag.isEnabled()
+    dlg.end_tag.setText("ZZ")
+    assert not dlg.ok_button.isEnabled()
+    dlg.end_tag.setText("00")
+    assert dlg.ok_button.isEnabled() and dlg.rule.end_tag == "00"
+    dlg.action.setCurrentIndex(dlg.action.findData("value"))
+    assert not dlg.end_tag.isEnabled()

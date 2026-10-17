@@ -38,7 +38,7 @@ FIELD_TYPES = {
 ACTIONS = {
     "value": "값 읽기",
     "open": "그룹 열기",
-    "close": "그룹 닫기",
+    "close": "그룹 닫기 (공통)",
     "toggle": "그룹 열기/닫기 (같은 태그)",
     "len_block": "길이 블록 (첫 필드 = 길이)",
     "count_block": "개수 블록 (첫 필드 = 항목 수)",
@@ -48,7 +48,8 @@ ACTIONS = {
 ENCODINGS = ["ascii", "utf-8", "cp949", "euc-kr", "latin-1", "cp1252", "utf-16-le", "utf-16-be",
              "shift_jis", "gbk", "big5"]
 
-UNKNOWN_MODES = {"hex": "hex + ASCII로 표시", "count": "byte 수만 표시", "stop": "해석 중단"}
+UNKNOWN_MODES = {"hex": "hex + ASCII (앞 32 byte)", "full": "hex + ASCII 전체 (16 byte씩 줄바꿈)",
+                 "count": "byte 수만 표시", "stop": "해석 중단"}
 
 
 @dataclass
@@ -97,9 +98,15 @@ class Rule:
     enabled: bool = True
     comment: str = ""
     bracket: str = "["  # "[" or "{" for groups
+    # "open" only: tag that closes this group. It is recognised only while this
+    # group is the innermost one, so the same bytes can mean something else elsewhere.
+    end_tag: str = ""
 
     def fields_summary(self) -> str:
-        return ", ".join(f.summary() for f in self.fields)
+        s = ", ".join(f.summary() for f in self.fields)
+        if self.action == "open" and self.end_tag:
+            s = f"{s}  닫는 태그 {self.end_tag}".strip()
+        return s
 
 
 @dataclass
@@ -284,6 +291,16 @@ class _Frame:
     rule: Rule | None
     limit: int | None = None  # len_block end offset
     remaining: int | None = None  # count_block items left
+    end_pat: list[int | None] | None = None  # open rule's own closing tag
+
+    @property
+    def plain(self) -> bool:
+        """Closed by a generic "close" rule (not a block, no own end tag)."""
+        return self.limit is None and self.remaining is None and self.end_pat is None
+
+
+def _pat_at(pat: list[int | None], data: bytes, pos: int, end: int) -> bool:
+    return pos + len(pat) <= end and all(b is None or data[pos + i] == b for i, b in enumerate(pat))
 
 
 class RuleEngine:
@@ -292,11 +309,14 @@ class RuleEngine:
         self.ctx = _Ctx(ruleset)
         self.errors: list[str] = []
         compiled = []
+        self.end_pats: dict[int, list[int | None]] = {}
         for r in ruleset.rules:
             if not r.enabled:
                 continue
             try:
                 pat = parse_tag(r.tag)
+                if r.action == "open" and r.end_tag.strip():
+                    self.end_pats[id(r)] = parse_tag(r.end_tag)
             except ValueError as e:
                 self.errors.append(f"규칙 '{r.name or r.tag}': {e}")
                 continue
@@ -327,11 +347,19 @@ class RuleEngine:
                 return rule, n
         return None
 
-    def _next_candidate(self, data: bytes, pos: int, end: int) -> int:
+    def _next_candidate(self, data: bytes, pos: int, end: int, end_pat=None) -> int:
+        """Next position where a rule (or the open group's end tag) could match."""
         if self._next_re is None:
             return pos
         m = self._next_re.search(data, pos, end)
-        return m.start() if m else end
+        nxt = m.start() if m else end
+        if end_pat is not None:
+            if end_pat[0] is None:
+                return pos
+            e = data.find(bytes([end_pat[0]]), pos, end)
+            if 0 <= e < nxt:
+                nxt = e
+        return nxt
 
     def decode(self, data: bytes, max_nodes: int = 2_000_000) -> Node:
         root = Node(0, len(data), GROUP, self.rs.name or "사용자 규칙")
@@ -346,9 +374,7 @@ class RuleEngine:
         def flush(upto: int) -> None:
             nonlocal unk_start
             if unk_start is not None and upto > unk_start:
-                b = data[unk_start:upto]
-                val = "" if self.rs.unknown == "count" else f"{hexs(b, 32)}  |{ascii_preview(b, 32)}|"
-                stack[-1].node.add(Node(unk_start, len(b), UNKNOWN, f"{len(b)} byte", val))
+                stack[-1].node.add(self._unknown(data, unk_start, upto, f"{upto - unk_start} byte"))
             unk_start = None
 
         def pop_frame(at: int, note: str = "") -> None:
@@ -374,6 +400,13 @@ class RuleEngine:
                 pop_frame(pos)
                 item_done(pos)
                 continue
+            if fr.end_pat is not None and _pat_at(fr.end_pat, data, pos, end):
+                # The innermost group's own end tag wins over every other rule.
+                flush(pos)
+                pos += len(fr.end_pat)
+                pop_frame(pos)
+                item_done(pos)
+                continue
             m = self.match(data, pos, end)
             if m is None:
                 if self.rs.unknown == "stop":
@@ -382,7 +415,7 @@ class RuleEngine:
                     break
                 if unk_start is None:
                     unk_start = pos
-                pos = max(pos + 1, self._next_candidate(data, pos + 1, end))
+                pos = max(pos + 1, self._next_candidate(data, pos + 1, end, fr.end_pat))
                 continue
             flush(pos)
             rule, taglen = m
@@ -406,12 +439,27 @@ class RuleEngine:
                 break
         flush(min(pos, n))
         if pos < n:
-            rest = data[pos:]
-            root.add(Node(pos, len(rest), UNKNOWN, f"{len(rest)} byte (해석 중단 이후)",
-                          f"{hexs(rest, 32)}  |{ascii_preview(rest, 32)}|"))
+            root.add(self._unknown(data, pos, n, f"{n - pos} byte (해석 중단 이후)"))
         while len(stack) > 1:
             pop_frame(min(pos, n), "닫히지 않음")
         return root
+
+    def _unknown(self, data: bytes, start: int, end: int, label: str) -> Node:
+        """A run of bytes no rule explained, shown per the rule set's unknown mode."""
+        b = data[start:end]
+        mode = self.rs.unknown
+        if mode == "count":
+            return Node(start, len(b), UNKNOWN, label)
+        if mode != "full":
+            return Node(start, len(b), UNKNOWN, label, f"{hexs(b, 32)}  |{ascii_preview(b, 32)}|")
+        # Full dump: one child line per 16 bytes. Children are plain values so
+        # the parent's UNKNOWN span is still what counts as unexplained.
+        node = Node(start, len(b), UNKNOWN, label)
+        for o in range(0, len(b), 16):
+            chunk = b[o:o + 16]
+            node.add(Node(start + o, len(chunk), VALUE, "",
+                          f"{chunk.hex(' ').upper():<47}  |{ascii_preview(chunk, 16)}|"))
+        return node
 
     def _read_fields(self, r: Reader, specs: list[FieldSpec]) -> tuple[str, list[int | None]]:
         parts, nums = [], []
@@ -444,18 +492,18 @@ class RuleEngine:
             return r.pos, "end"
         if a == "toggle":
             top = stack[-1]
-            if top.rule is rule and top.limit is None and top.remaining is None:
+            if top.rule is rule and top.plain:
                 return r.pos, len(stack) - 1
             a = "open"
         if a == "open":
             text, _ = self._read_fields(r, rule.fields)
             g = parent.add(Node(pos, r.pos - pos, GROUP, label, text, close=close))
-            stack.append(_Frame(g, rule))
+            stack.append(_Frame(g, rule, end_pat=self.end_pats.get(id(rule)) if rule.action == "open" else None))
             return r.pos, "open"
         if a == "close":
             text, _ = self._read_fields(r, rule.fields)
             for i in range(len(stack) - 1, 0, -1):
-                if stack[i].limit is None and stack[i].remaining is None:
+                if stack[i].plain:
                     if text:
                         stack[i].node.value = f"{stack[i].node.value} {text}".strip()
                     return r.pos, i

@@ -119,6 +119,74 @@ def test_open_close_and_errors():
     assert "해석 종료" in out2 and "해석 중단 이후" in out2
 
 
+def _obj_rules(**kw):
+    return RuleSet(rules=[
+        Rule("0B", "객체", "open", bracket="{", end_tag=kw.get("end_tag", "00")),
+        Rule("09", "문자열", fields=[FieldSpec("cstring")]),
+        Rule("05", "정수", fields=[FieldSpec("int", size=4)]),
+        Rule("0A", "배열", "toggle"),
+    ])
+
+
+def test_end_tag_closes_its_own_group():
+    i = lambda v: v.to_bytes(4, "little")  # noqa: E731
+    data = (b"\x0b\x09name\x00\x0b\x05" + i(1) + b"\x00"
+            + b"\x0a\x05" + i(2) + b"\x05" + i(3) + b"\x0a\x00")
+    assert text_of(data, _obj_rules()) == (
+        '객체 {\n  문자열: "name"\n  객체 {\n    정수: 1\n  }\n'
+        "  배열 [\n    정수: 2\n    정수: 3\n  ]\n}\n")
+
+
+def test_end_tag_is_ignored_inside_other_groups_and_outside():
+    # 00 inside the 0A array is just an unknown byte; it does not close 0B.
+    data = b"\x0b\x0a\x09a\x00\x00\x09b\x00\x0a\x00"
+    out = text_of(data, _obj_rules())
+    assert out == '객체 {\n  배열 [\n    문자열: "a"\n    ?? 1 byte: 00  |.|\n    문자열: "b"\n  ]\n}\n'
+    # 00 outside any 0B group (padding) is unknown, not an error.
+    out = text_of(b"\x00\x00\x0b\x09a\x00\x00\x00", _obj_rules())
+    assert "오류" not in out
+    assert out == '?? 2 byte: 00 00  |..|\n객체 {\n  문자열: "a"\n}\n?? 1 byte: 00  |.|\n'
+
+
+def test_end_tag_multibyte_beats_other_rules_and_unclosed_note():
+    rs = _obj_rules(end_tag="09 FF")  # 09 is also the string rule's tag
+    out = text_of(b"\x0b\x09a\x00\x09\xff\x0b\x09b\x00", rs)
+    assert out == '객체 {\n  문자열: "a"\n}\n객체 {  (닫히지 않음)\n  문자열: "b"\n}\n'
+
+
+def test_generic_close_skips_groups_with_end_tag():
+    rs = _obj_rules()
+    rs.rules += [Rule("7B", "블록", "open"), Rule("7D", "블록 끝", "close")]
+    out = text_of(b"\x7b\x0b\x09a\x00\x00\x7d", rs)
+    assert out == '블록 [\n  객체 {\n    문자열: "a"\n  }\n]\n'
+
+
+def test_bad_end_tag_reported():
+    root = decode_with_rules(b"\x0b", _obj_rules(end_tag="XYZ"))
+    assert any(n.kind == ERROR and "객체" in n.label for n in root.walk())
+
+
+def test_unknown_full_dump():
+    rs = example_ruleset()
+    rs.unknown = "full"
+    data = bytes(range(0x30, 0x30 + 20)) + b"\x04\x01"
+    root = decode_with_rules(data, rs)
+    out = render_text(root, data, RenderOptions(offsets=False))
+    assert out.splitlines()[:3] == [
+        "?? 20 byte",
+        "  30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F  |0123456789:;<=>?|",
+        "  40 41 42 43                                      |@ABC|",
+    ]
+    from binarytotext.model import compute_stats
+    st = compute_stats(root, len(data))
+    assert st.unknown == 20 and st.explained == 2
+
+
+def test_ruleset_without_end_tag_still_loads():
+    rs = RuleSet.from_dict({"rules": [{"tag": "0B", "name": "x", "action": "open"}]})
+    assert rs.rules[0].end_tag == ""
+
+
 def test_ruleset_json_roundtrip(tmp_path):
     rs = example_ruleset()
     rs.rules[1].fields[0].map = {"1": "하나"}

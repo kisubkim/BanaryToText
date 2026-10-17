@@ -54,7 +54,7 @@ def render_text(root: Node, data: bytes, opts: RenderOptions | None = None,
                 put(n, f"{' ' * len(prefix(n))}{pad}{n.close}")
             return True
         if n.kind == UNKNOWN:
-            line = f"?? {n.label}: {n.value}"
+            line = f"?? {n.label}" + (f": {n.value}" if n.value else "")
         elif n.kind == ERROR:
             line = f"!! 오류: {n.label}" + (f" — {n.value}" if n.value else "")
         elif n.kind == INFO:

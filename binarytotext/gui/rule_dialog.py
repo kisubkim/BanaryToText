@@ -47,6 +47,7 @@ class RuleDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("규칙 편집")
         self.resize(820, 620)
+        self.original = rule  # replaced by the edited copy in the preview
         self.rule = copy.deepcopy(rule)
         self.ruleset = ruleset
         self.data = data
@@ -62,6 +63,10 @@ class RuleDialog(QDialog):
         self.bracket = _combo([("[", "[ ]"), ("{", "{ }")])
         _set_combo(self.bracket, self.rule.bracket)
         self.comment = QLineEdit(self.rule.comment)
+        self.end_tag = QLineEdit(self.rule.end_tag)
+        self.end_tag.setPlaceholderText("예: 00   FF FF   (비우면 공통 '그룹 닫기' 규칙으로 닫음)")
+        self.end_tag.setFont(mono_font())
+        self.end_msg = QLabel()
         self.action_help = QLabel()
         self.action_help.setWordWrap(True)
 
@@ -72,6 +77,8 @@ class RuleDialog(QDialog):
         top.addRow("동작", self.action)
         top.addRow("", self.action_help)
         top.addRow("그룹 괄호", self.bracket)
+        top.addRow("닫는 태그 (hex)", self.end_tag)
+        top.addRow("", self.end_msg)
         top.addRow("메모", self.comment)
 
         # Fields list + editor
@@ -122,7 +129,7 @@ class RuleDialog(QDialog):
         self.preview.setReadOnly(True)
         self.preview.setFont(mono_font())
         self.preview.setMaximumHeight(110)
-        pg = QGroupBox("미리보기 (파일에서 이 태그가 처음 나오는 위치에 이 규칙만 적용)")
+        pg = QGroupBox("미리보기 (이 태그가 처음 나오는 위치부터, 다른 규칙과 함께 적용)")
         pl = QVBoxLayout()
         pl.addWidget(self.preview)
         pg.setLayout(pl)
@@ -138,7 +145,7 @@ class RuleDialog(QDialog):
         lay.addWidget(pg)
         lay.addWidget(bb)
 
-        for w in (self.tag, self.name, self.comment, self.f_name, self.f_term):
+        for w in (self.tag, self.name, self.comment, self.end_tag, self.f_name, self.f_term):
             w.textChanged.connect(self._changed)
         for c in (self.action, self.bracket, self.f_type, self.f_endian, self.f_len, self.f_fmt):
             c.currentIndexChanged.connect(self._changed)
@@ -254,14 +261,30 @@ class RuleDialog(QDialog):
         self.rule.action = self.action.currentData()
         self.rule.bracket = self.bracket.currentData()
         self.rule.comment = self.comment.text()
+        self.rule.end_tag = self.end_tag.text().strip()
         self.action_help.setText(_ACTION_HELP.get(self.rule.action, ""))
         self.bracket.setEnabled(self.rule.action in ("open", "toggle", "len_block", "count_block"))
+        is_open = self.rule.action == "open"
+        self.end_tag.setEnabled(is_open)
+        end_ok = True
+        if not is_open:
+            self.end_msg.setText("'그룹 열기' 동작에서만 사용합니다.")
+        elif not self.rule.end_tag:
+            self.end_msg.setText("비어 있음: 공통 '그룹 닫기' 규칙이 이 그룹을 닫습니다.")
+        else:
+            try:
+                ep = parse_tag(self.rule.end_tag)
+                self.end_msg.setText(f"✓ 이 그룹이 가장 안쪽일 때만 {len(ep)} byte 닫는 태그로 인식합니다 "
+                                     "(다른 규칙보다 우선).")
+            except ValueError as e:
+                self.end_msg.setText(f"✗ {e}")
+                end_ok = False
         try:
             pat = parse_tag(self.rule.tag)
             hits = _count_hits(self.data, pat)
             self.tag_msg.setText(f"✓ {len(pat)} byte 태그, 파일에서 {hits}회 등장" if self.data else
                                  f"✓ {len(pat)} byte 태그")
-            self.ok_button.setEnabled(True)
+            self.ok_button.setEnabled(end_ok)
         except ValueError as e:
             self.tag_msg.setText(f"✗ {e}")
             self.ok_button.setEnabled(False)
@@ -275,7 +298,8 @@ class RuleDialog(QDialog):
             self.preview.setPlainText("이 태그는 파일에 없습니다.")
             return
         rs = RuleSet(name="미리보기", endian=self.ruleset.endian, encoding=self.ruleset.encoding,
-                     unknown="hex", rules=[self.rule])
+                     unknown="hex",
+                     rules=[r for r in self.ruleset.rules if r is not self.original] + [self.rule])
         chunk = self.data[pos:pos + 512]
         root = RuleEngine(rs).decode(chunk)
         text = render_text(root, chunk, RenderOptions(offsets=False, max_lines=6))
@@ -288,8 +312,10 @@ class RuleDialog(QDialog):
 
 _ACTION_HELP = {
     "value": "태그 다음의 필드들을 읽어 '이름: 값' 한 줄로 출력합니다. 필드가 없으면 이름만 출력(1 byte → 글자 표시 용도).",
-    "open": "그룹(배열/구조체)을 엽니다. 이후 항목들은 '그룹 닫기' 규칙이 나올 때까지 안쪽에 들여쓰기 됩니다.",
-    "close": "가장 안쪽의 열린 그룹을 닫습니다.",
+    "open": "그룹(배열/구조체)을 엽니다. 이후 항목들은 닫는 태그(아래에서 지정) 또는 공통 '그룹 닫기' 규칙이 "
+            "나올 때까지 안쪽에 들여쓰기 됩니다.",
+    "close": "닫는 태그가 지정되지 않은 그룹 중 가장 안쪽 것을 닫습니다. 그룹마다 닫는 값이 다르면 "
+             "'그룹 열기' 규칙의 '닫는 태그'를 쓰세요.",
     "toggle": "같은 태그가 처음 나오면 그룹을 열고, 다음에 나오면 닫습니다 (예: 0A ... 0A).",
     "len_block": "첫 필드(정수)가 길이입니다. 그만큼의 byte를 그룹 안쪽 내용으로 해석합니다.",
     "count_block": "첫 필드(정수)가 항목 개수입니다. 그만큼의 항목을 그룹 안쪽으로 해석합니다.",
