@@ -129,4 +129,17 @@ btt formats            # 내장 포맷과 옵션 목록
 
 ## 라이선스
 
-MIT
+이 저장소의 소스 코드는 MIT 라이선스입니다 (`LICENSE`).
+
+사용하는 외부 구성 요소:
+
+| 구성 요소 | 라이선스 | 비고 |
+|---|---|---|
+| PySide6 / Qt | LGPL-3.0 (또는 GPL) | GUI 전용. 저장소에는 포함하지 않고 `pip install` 로 받습니다 |
+| PyInstaller | GPL-2.0+ (부트로더 예외) | 빌드 도구. 예외 조항으로 만든 exe 배포에는 제약 없음 |
+| pytest, pyflakes | MIT | 개발용 |
+
+명령줄 `btt.exe` 와 GUI 를 뺀 모듈은 Python 표준 라이브러리만 씁니다.
+`BinaryToText.exe` 는 Qt(LGPL-3.0)를 함께 묶으므로, 이 exe 를 다른 사람에게 배포할 때는
+Qt/PySide6 의 LGPL 고지와 라이선스 전문을 같이 제공하고, 받는 사람이 Qt 라이브러리를 교체할 수 있게 해야 합니다
+(단일 exe 대신 PyInstaller `--onedir` 빌드로 배포하면 교체가 쉽습니다).
