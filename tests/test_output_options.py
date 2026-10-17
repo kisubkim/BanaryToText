@@ -21,7 +21,8 @@ def render(data, rs, **opts):
 def test_key_value_pairs_and_alternation():
     data = b"\x09volume\x00\x04\x1e\x09mode\x00\x09auto\x00\x09list\x00\x0a\x04\x01\x04\x02\x0a"
     text = render(data, kv_rules())
-    assert text.splitlines()[:3] == ["volume = 30", "mode = auto", "list = ["]
+    assert text.splitlines()[:3] == ["volume = 30", 'mode = "auto"', "list = ["]
+    assert render(data, kv_rules(), quotes=False).splitlines()[1] == "mode = auto"
     root = decode_with_rules(data, kv_rules())
     first = root.children[0]
     assert (first.offset, first.length, first.key) == (0, 10, True)  # span covers key and value
@@ -29,15 +30,23 @@ def test_key_value_pairs_and_alternation():
     assert '"value": "\\"auto\\""' in render_json(root)  # JSON keeps the quoted string
 
 
-def test_key_string_values_lose_only_their_own_quotes():
+def test_quotes_option():
     rs = kv_rules()
     rs.rules.append(Rule("0D", "둘", fields=[FieldSpec("cstring"), FieldSpec("cstring")]))
     data = (b'\x09a\x00\x09say "hi"\x00' + b"\x09b\x00\x0dx\x00y\x00"
-            + b"\x09c\x00\x0a\x09p\x00\x09q\x00\x0a")
-    lines = render(data, rs, layout="arrays").splitlines()
-    assert lines[0] == 'a = say \\"hi\\"'  # one string: outer quotes gone, escapes stay
-    assert lines[1] == 'b = "x", "y"'  # two strings: left as is
-    assert lines[2:] == ["c = [p = q]"]  # inside the array 09 is a key again
+            + b"\x09c\x00\x0a\x09p\x00\x09q\x00\x0a" + b"\x09t\x00\x09l1\nl2\x00")
+    on = render(data, rs, layout="arrays").splitlines()
+    assert on == ['a = "say \\"hi\\""', 'b = "x", "y"', 'c = [p = "q"]', 't = "l1\\nl2"']
+    off = render(data, rs, layout="arrays", quotes=False).splitlines()
+    # Quotes inside a string come out as plain ", control characters stay escaped (one item per line).
+    assert off == ['a = say "hi"', "b = x, y", "c = [p = q]", "t = l1\\nl2"]
+    # Plain strings and values-only output follow the option too.
+    plain = kv_rules()
+    plain.rules[0].key = False
+    d2 = b"\x0a\x04\x01\x04\x02\x09abc\x00\x09\x00\x09cde\x00\x0a"
+    assert render(d2, plain, labels=False, layout="inline", quotes=False).splitlines() == ["[1, 2, abc, , cde]"]
+    assert render(d2, plain, labels=False, layout="inline").splitlines() == ['[1, 2, "abc", "", "cde"]']
+    assert render(b"\x09\x00", plain, quotes=False).splitlines() == ["문자열:"]
 
 
 def test_plain_strings_keep_quotes():
@@ -129,8 +138,8 @@ def test_inline_groups_and_rule_override():
 
 def test_commas_with_keys():
     data = b"\x0b\x09ip\x00\x09x\x00\x09port\x00\x04\x50\x00"
-    assert render(data, kv_rules(), commas=True).splitlines() == ["객체 {", "  ip = x,", "  port = 80", "}"]
-    assert render(data, kv_rules(), layout="inline").splitlines() == ["객체 {ip = x, port = 80}"]
+    assert render(data, kv_rules(), commas=True).splitlines() == ["객체 {", '  ip = "x",', "  port = 80", "}"]
+    assert render(data, kv_rules(), layout="inline", quotes=False).splitlines() == ["객체 {ip = x, port = 80}"]
 
 
 def test_cli_layout_and_commas(tmp_path):
@@ -151,9 +160,18 @@ def test_empty_strings_stay_visible():
     plain.rules[0].key = False
     assert render(b"\x09\x00\x04\x01", plain).splitlines() == ['문자열: ""', "정수: 1"]
     assert render(b"\x0a\x09\x00\x09a\x00\x0a", plain, labels=False, layout="inline").splitlines() == ['["", "a"]']
-    # Empty value of a key keeps its quotes, and the next key still pairs normally.
+    # Empty value of a key, and the next key still pairs normally.
     data = b"\x09mode\x00\x09\x00\x09ip\x00\x09x\x00"
-    assert render(data, kv_rules()).splitlines() == ['mode = ""', "ip = x"]
-    assert render(data, kv_rules(), layout="inline", commas=True).splitlines() == ['mode = ""', "ip = x"]
-    # Empty key: shown as "" rather than the rule name.
+    assert render(data, kv_rules()).splitlines() == ['mode = ""', 'ip = "x"']
+    assert render(data, kv_rules(), quotes=False).splitlines() == ["mode =", "ip = x"]  # empty: nothing
+    # Empty key: shown as "" rather than the rule name (nothing without quotes).
     assert render(b"\x09\x00\x04\x1e", kv_rules()).splitlines() == ['"" = 30']
+    assert render(b"\x09\x00\x04\x1e", kv_rules(), quotes=False).splitlines() == [" = 30"]
+
+
+def test_cli_no_quotes(tmp_path):
+    rs_path, f, out = tmp_path / "r.json", tmp_path / "x.bin", tmp_path / "o.txt"
+    kv_rules().save(rs_path)
+    f.write_bytes(b"\x09mode\x00\x09auto\x00")
+    assert main(["decode", str(f), "--rules", str(rs_path), "--no-offsets", "--no-quotes", "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8").splitlines() == ["mode = auto"]

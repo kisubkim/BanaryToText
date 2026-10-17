@@ -23,6 +23,7 @@ class RenderOptions:
     # on one line, "inline" every group on one line. A group's own Node.layout overrides it.
     layout: str = "lines"
     commas: bool = False  # "," after every item but the last inside a multi-line group
+    quotes: bool = True  # False: strings without quotes (an empty string becomes nothing)
 
 
 def render_text(root: Node, data: bytes, opts: RenderOptions | None = None,
@@ -63,12 +64,24 @@ def render_text(root: Node, data: bytes, opts: RenderOptions | None = None,
         return mode == "arrays" and n.close == "]" and (
             all(c.kind == VALUE and not c.children for c in n.children) and (not opts.labels or plain_list(n)))
 
+    def val(n: Node) -> str:
+        return n.value if opts.quotes else _strip_quotes(n.value)
+
+    def key_name(n: Node) -> str:
+        if opts.quotes:
+            return n.label
+        return "" if n.label == '""' else _unescape(n.label)
+
+    def joined(left: str, sep: str, right: str) -> str:
+        return f"{left}{sep} {right}" if right else f"{left}{sep}"  # empty string: nothing after the separator
+
     def head_of(n: Node) -> str:
+        v = val(n)
         if n.key:
-            return f"{n.label} =" + (f" {n.value}" if n.value else "")
+            return joined(key_name(n), " =", v)
         if opts.labels:
-            return n.label + (f" {n.value}" if n.value else "")
-        return n.value
+            return n.label + (f" {v}" if v else "")
+        return v
 
     def leaf_text(n: Node, drop_label: bool = False) -> str:
         if n.kind == UNKNOWN:
@@ -77,11 +90,14 @@ def render_text(root: Node, data: bytes, opts: RenderOptions | None = None,
             return f"!! 오류: {n.label}" + (f" — {n.value}" if n.value else "")
         if n.kind == INFO:
             return f"# {n.label}" + (f": {n.value}" if n.value else "")
+        v = val(n)
         if n.key:
-            return f"{n.label} = {_unquote(n.value)}"
+            return joined(key_name(n), " =", v)
+        if n.value == "":  # a value-less rule only has its name to show
+            return n.label
         if not opts.labels or drop_label:
-            return n.value if n.value != "" else n.label  # a value-less rule only has its name to show
-        return f"{n.label}: {n.value}" if n.value != "" and n.label else (n.label or n.value)
+            return v
+        return joined(n.label, ":", v) if n.label else v
 
     def one_line(n: Node, drop_label: bool = False) -> str:
         """Whole node (and everything inside) as one piece of text."""
@@ -125,13 +141,18 @@ def render_text(root: Node, data: bytes, opts: RenderOptions | None = None,
     return "\n".join(out) + ("\n" if out else "")
 
 
-_ONE_STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+_QUOTED = re.compile(r'"((?:[^"\\]|\\.)*)"')
+_QUOTE_ESCAPE = re.compile(r'\\(["\\])')
 
 
-def _unquote(v: str) -> str:
-    """key = "text" -> key = text. Only a single quoted string; escapes stay visible.
-    An empty string keeps its quotes so it is still visible: key = ""."""
-    return v[1:-1] if v != '""' and _ONE_STRING.fullmatch(v) else v
+def _unescape(s: str) -> str:
+    """\\" -> " and \\\\ -> \\. Control escapes (\\n, \\t, \\0) stay visible so an item stays on one line."""
+    return _QUOTE_ESCAPE.sub(r"\1", s)
+
+
+def _strip_quotes(v: str) -> str:
+    """Remove the quotes of every quoted string in a value: '"a", 3, ""' -> 'a, 3, '."""
+    return _QUOTED.sub(lambda m: _unescape(m.group(1)), v)
 
 
 def _opener(close: str) -> str:

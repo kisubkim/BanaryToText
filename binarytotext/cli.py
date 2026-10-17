@@ -23,7 +23,8 @@ def _opt_value(s: str):
 
 def _render_opts(args) -> RenderOptions:
     return RenderOptions(offsets=not args.no_offsets, raw_hex=args.raw,
-                         labels=not args.no_labels, layout=args.layout, commas=args.commas)
+                         labels=not args.no_labels, layout=args.layout, commas=args.commas,
+                         quotes=not args.no_quotes)
 
 
 def _opts(pairs: list[str]) -> dict:
@@ -95,6 +96,7 @@ def main(argv: list[str] | None = None, gui: bool = True) -> int:
     d.add_argument("--layout", choices=list(LAYOUTS), default="lines",
                    help="그룹 표시: lines 줄마다(기본), arrays 값만 든 배열만 한 줄, inline 모든 그룹 한 줄 (규칙의 그룹 표시 설정이 우선)")
     d.add_argument("--commas", action="store_true", help="그룹 안 항목 뒤에 쉼표 (마지막 제외)")
+    d.add_argument("--no-quotes", action="store_true", help="문자열을 따옴표 없이 (빈 문자열은 비워 둠)")
 
     a = sub.add_parser("analyze", help="자동 분석 보고서")
     a.add_argument("file")
@@ -124,6 +126,7 @@ def main(argv: list[str] | None = None, gui: bool = True) -> int:
     b.add_argument("--layout", choices=list(LAYOUTS), default="lines",
                    help="그룹 표시: lines 줄마다(기본), arrays 값만 든 배열만 한 줄, inline 모든 그룹 한 줄 (규칙의 그룹 표시 설정이 우선)")
     b.add_argument("--commas", action="store_true", help="그룹 안 항목 뒤에 쉼표 (마지막 제외)")
+    b.add_argument("--no-quotes", action="store_true", help="문자열을 따옴표 없이 (빈 문자열은 비워 둠)")
 
     sub.add_parser("formats", help="내장 포맷 목록")
 

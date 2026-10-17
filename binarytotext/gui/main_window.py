@@ -192,7 +192,11 @@ class MainWindow(QMainWindow):
         self.chk_commas.setToolTip("그룹 안의 항목 뒤에 쉼표를 붙입니다 (마지막 항목 제외).\n"
                                    "한 줄로 이어 쓰는 그룹은 항상 쉼표로 구분합니다.")
         self.chk_commas.setChecked(self.settings.value("commas", False, type=bool))
-        for c in (self.chk_offsets, self.chk_raw, self.chk_labels, self.chk_commas):
+        self.chk_quotes = QCheckBox("따옴표")
+        self.chk_quotes.setToolTip("문자열을 \"…\" 로 감싸 표시합니다 (key = \"값\" 포함).\n"
+                                   "끄면 따옴표 없이: 1, 2, abc, , cde (빈 문자열은 비워 둠)")
+        self.chk_quotes.setChecked(self.settings.value("quotes", True, type=bool))
+        for c in (self.chk_offsets, self.chk_raw, self.chk_labels, self.chk_quotes, self.chk_commas):
             c.toggled.connect(self.schedule)
             tb.addWidget(c)
         tb.addWidget(QLabel(" 그룹 "))
@@ -545,7 +549,7 @@ class MainWindow(QMainWindow):
     def _render_opts(self) -> RenderOptions:
         return RenderOptions(offsets=self.chk_offsets.isChecked(), raw_hex=self.chk_raw.isChecked(),
                              labels=self.chk_labels.isChecked(), layout=self.layout_combo.currentData(),
-                             commas=self.chk_commas.isChecked())
+                             commas=self.chk_commas.isChecked(), quotes=self.chk_quotes.isChecked())
 
     def _current_opts(self) -> dict:
         mode = self.mode.currentData()
@@ -1110,6 +1114,7 @@ class MainWindow(QMainWindow):
         self.settings.setValue("raw_hex", self.chk_raw.isChecked())
         self.settings.setValue("labels", self.chk_labels.isChecked())
         self.settings.setValue("commas", self.chk_commas.isChecked())
+        self.settings.setValue("quotes", self.chk_quotes.isChecked())
         self.settings.setValue("layout", self.layout_combo.currentData())
         self.settings.setValue("ruleset_json", self.ruleset.to_json())
         if self.batch_dlg is not None:
