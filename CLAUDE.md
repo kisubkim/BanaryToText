@@ -1,0 +1,32 @@
+# CLAUDE.md
+
+Offline Windows desktop app (PySide6) that turns unknown binary files into human-readable text,
+via user-defined tag rules or built-in known formats. No browser, no network. MIT.
+
+## Commands
+
+Run from this folder with the project venv.
+
+- Tests: `.venv/Scripts/python -m pytest -q` (GUI tests run offscreen, settings go to a temp INI via `BINARYTOTEXT_SETTINGS`)
+- Single test: `.venv/Scripts/python -m pytest -q tests/test_rules.py::test_example_from_request`
+- Lint: `.venv/Scripts/python -m pyflakes binarytotext tests` (unused-import warnings in `formats/__init__.py` are intentional)
+- GUI from source: `.venv/Scripts/python -m binarytotext [file]`
+- CLI: `.venv/Scripts/python -m binarytotext decode|analyze|formats ...`
+- Release build: `powershell -ExecutionPolicy Bypass -File build.ps1` → `dist/BinaryToText.exe` (GUI) and `dist/btt.exe` (CLI, built without Qt)
+
+## Architecture
+
+- `model.py`: `Node` tree (offset, length, kind, label, value, children) shared by everything. Kinds: group/value/unknown/error/info.
+- `rules.py`: `RuleSet`/`Rule`/`FieldSpec` (JSON via dataclasses) and `RuleEngine`. The engine scans left to right, applies the longest matching tag, groups unmatched bytes into unknown runs. Group handling is a frame stack; `_apply` returns an event and the main loop does all stack bookkeeping (count_block items are counted in `item_done`).
+- `formats/`: built-in decoders. Each module calls `register(Decoder(...))`; `Option` lists drive the GUI form; `variants` and `single_root` feed the auto-detector. Decoders read with `reader.Reader` (bounds-checked, raises `DecodeError`) and use `base.run_stream` so a failure leaves the partial tree plus an error node and a trailing unknown node.
+- `heuristics.py`: strings (ASCII/UTF-8/UTF-16/CP949), tag/rule suggestions, entropy, magic, record periods, format ranking (`FormatScore.score` penalises errors, 1-byte noise and many roots).
+- `preprocess.py`: stdlib-only transforms (decompress, base64, hex text, XOR, skip).
+- `render.py`: Node tree → text (optional `line_nodes` maps each line back to a node for GUI linking) or JSON.
+- `gui/`: `main_window.py` (decoding runs in `QThread`s with a generation counter; stale results are dropped), `hexview.py` (table-model hex view + inspector), `rule_dialog.py` (rule editor with live preview).
+
+## Conventions
+
+- Code comments and docstrings in English; UI strings, docs and commit messages in Korean.
+- Stdlib only outside `gui/` (the CLI exe excludes PySide6). Never import PySide6 from non-GUI modules.
+- Python with `\x..` escapes or backslashes must be edited with Edit/Write, not bash heredocs.
+- New decoder: add a test with a spec test vector in `tests/test_formats.py`; `test_all_decoders_survive_random_bytes` must keep passing.

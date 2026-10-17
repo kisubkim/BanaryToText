@@ -1,0 +1,908 @@
+"""Main window: hex view | rules / format options / analysis | text and tree output."""
+
+from __future__ import annotations
+
+import copy
+import os
+import time
+import traceback
+from pathlib import Path
+
+from PySide6.QtCore import QSettings, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QAction, QColor, QKeySequence, QTextCursor, QTextFormat
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox,
+                               QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
+                               QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QTableWidget,
+                               QTableWidgetItem, QTabWidget, QTextEdit, QToolBar, QTreeWidget, QTreeWidgetItem,
+                               QVBoxLayout, QWidget)
+
+from .. import __version__, heuristics, preprocess
+from ..formats import REGISTRY
+from ..model import ERROR, GROUP, INFO, UNKNOWN, Node, compute_stats, deepest_at
+from ..render import RenderOptions, render_json, render_text
+from ..rules import ACTIONS, ENCODINGS, UNKNOWN_MODES, FieldSpec, Rule, RuleEngine, RuleSet, example_ruleset
+from .hexview import HexView, Inspector, mono_font
+from .rule_dialog import RuleDialog
+
+RULES_MODE = "__rules__"
+MAX_TEXT_LINES = 200_000
+
+
+def build_marks(root: Node, n: int) -> bytearray:
+    """Per byte: 0 explained, 1 unknown, 2 not covered by any node."""
+    marks = bytearray(b"\x02") * n
+    unknown = []
+    for node in root.walk():
+        if node is root or node.kind in (ERROR, INFO) or node.length <= 0:
+            continue
+        s, e = node.offset, min(node.end, n)
+        if node.kind == UNKNOWN:
+            unknown.append((s, e))
+        elif e > s:
+            marks[s:e] = bytes(e - s)
+    for s, e in unknown:
+        if e > s:
+            marks[s:e] = b"\x01" * (e - s)
+    return marks
+
+
+class DecodeJob(QThread):
+    done = Signal(int, object)
+
+    def __init__(self, gen: int, data: bytes, mode: str, ruleset: RuleSet, opts: dict, ropts: RenderOptions):
+        super().__init__()
+        self.setStackSize(64 << 20)  # deep recursive formats
+        self.gen, self.data, self.mode, self.ruleset, self.opts, self.ropts = gen, data, mode, ruleset, opts, ropts
+
+    def run(self) -> None:
+        t0 = time.perf_counter()
+        try:
+            if self.mode == RULES_MODE:
+                root = RuleEngine(self.ruleset).decode(self.data)
+            else:
+                root = REGISTRY[self.mode].decode(self.data, self.opts)
+            lines: list[Node] = []
+            ro = copy.copy(self.ropts)
+            ro.max_lines = MAX_TEXT_LINES
+            text = render_text(root, self.data, ro, lines)
+            res = dict(root=root, text=text, lines=lines, stats=compute_stats(root, len(self.data)),
+                       marks=build_marks(root, len(self.data)), elapsed=time.perf_counter() - t0)
+        except Exception:
+            res = dict(error=traceback.format_exc())
+        self.done.emit(self.gen, res)
+
+
+class AnalyzeJob(QThread):
+    done = Signal(object)
+
+    def __init__(self, data: bytes):
+        super().__init__()
+        self.setStackSize(64 << 20)
+        self.data = data
+
+    def run(self) -> None:
+        try:
+            self.done.emit(heuristics.analyze(self.data))
+        except Exception:
+            self.done.emit(traceback.format_exc())
+
+
+def _ro_item(text, data=None) -> QTableWidgetItem:
+    it = QTableWidgetItem(str(text))
+    it.setFlags(it.flags() & ~Qt.ItemIsEditable)
+    if data is not None:
+        it.setData(Qt.UserRole, data)
+    return it
+
+
+class MainWindow(QMainWindow):
+    def __init__(self, path: str | None = None):
+        super().__init__()
+        ini = os.environ.get("BINARYTOTEXT_SETTINGS")  # tests use a throwaway INI file
+        self.settings = QSettings(ini, QSettings.IniFormat) if ini else QSettings("BinaryToText", "BinaryToText")
+        self.raw = b""
+        self.data = b""
+        self.path: Path | None = None
+        self.rules_path: Path | None = None
+        self.ruleset = self._restore_ruleset()
+        self.format_opts: dict[str, dict] = {}
+        self.gen = 0
+        self.jobs: list[QThread] = []
+        self.result: dict | None = None
+        self.node_line: dict[int, int] = {}
+        self._syncing = False
+        self.report = None
+
+        self.setWindowTitle(f"BinaryToText {__version__}")
+        self.setAcceptDrops(True)
+        self.decode_timer = QTimer(self, singleShot=True, interval=200, timeout=self.decode)
+
+        self._build_toolbar()
+        self._build_body()
+        self._refresh_rule_table()
+        self._on_mode_changed()
+        geo = self.settings.value("geometry")
+        if geo is not None:
+            self.restoreGeometry(geo)
+        else:
+            self.resize(1600, 900)
+        if path:
+            self.open_file(path)
+        else:
+            self.statusBar().showMessage("파일을 열거나 창으로 끌어다 놓으세요 (Ctrl+O)")
+
+    # ------------------------------------------------------------------ UI
+    def _build_toolbar(self) -> None:
+        tb = QToolBar("도구")
+        tb.setMovable(False)
+        self.addToolBar(tb)
+
+        def act(text, slot, key=None, tip=""):
+            a = QAction(text, self)
+            a.triggered.connect(slot)
+            if key:
+                a.setShortcut(QKeySequence(key))
+            a.setToolTip(tip or text)
+            tb.addAction(a)
+            return a
+
+        act("열기", self.open_dialog, "Ctrl+O", "바이너리 파일 열기 (Ctrl+O)")
+        act("텍스트 저장", self.save_text, "Ctrl+S", "해석 결과를 텍스트 파일로 저장 (Ctrl+S)")
+        act("JSON 저장", self.save_json, None, "해석 트리를 JSON으로 저장")
+        tb.addSeparator()
+        tb.addWidget(QLabel(" 해석 방식 "))
+        self.mode = QComboBox()
+        self.mode.addItem("사용자 규칙 (직접 정의)", RULES_MODE)
+        for dec in sorted(REGISTRY.values(), key=lambda d: (d.family != "TLV", d.family, d.title)):
+            self.mode.addItem(f"[{dec.family}] {dec.title}", dec.key)
+            self.mode.setItemData(self.mode.count() - 1, dec.description, Qt.ToolTipRole)
+        last = self.settings.value("mode", RULES_MODE)
+        i = self.mode.findData(last)
+        self.mode.setCurrentIndex(max(0, i))
+        self.mode.currentIndexChanged.connect(self._on_mode_changed)
+        tb.addWidget(self.mode)
+        tb.addWidget(QLabel("  전처리 "))
+        self.pre = QComboBox()
+        for k, v in preprocess.TRANSFORMS.items():
+            self.pre.addItem(v, k)
+        self.pre.currentIndexChanged.connect(self._apply_preprocess)
+        tb.addWidget(self.pre)
+        self.pre_arg = QLineEdit()
+        self.pre_arg.setPlaceholderText("N / XOR 키")
+        self.pre_arg.setMaximumWidth(90)
+        self.pre_arg.editingFinished.connect(self._apply_preprocess)
+        tb.addWidget(self.pre_arg)
+        tb.addSeparator()
+        self.chk_offsets = QCheckBox("오프셋")
+        self.chk_offsets.setChecked(self.settings.value("offsets", True, type=bool))
+        self.chk_raw = QCheckBox("원본 hex")
+        self.chk_raw.setChecked(self.settings.value("raw_hex", False, type=bool))
+        for c in (self.chk_offsets, self.chk_raw):
+            c.toggled.connect(self.schedule)
+            tb.addWidget(c)
+        tb.addSeparator()
+        act("다시 해석", self.decode, "F5")
+        act("자동 분석", self.run_analysis, "F6", "모르는 파일 분석: 포맷 추정, 태그 후보, 문자열 (F6)")
+
+    def _build_body(self) -> None:
+        # Left: hex + inspector
+        self.hex = HexView()
+        self.hex.cursor_moved.connect(self._on_hex_cursor)
+        self.hex.add_rule_requested.connect(self._add_rule_from_bytes)
+        self.inspector = Inspector()
+        left = QSplitter(Qt.Vertical)
+        left.addWidget(self.hex)
+        left.addWidget(self.inspector)
+        left.setSizes([600, 300])
+
+        # Middle: tabs
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self._build_rules_tab(), "규칙")
+        self.opt_tab = QWidget()
+        self.opt_layout = QVBoxLayout(self.opt_tab)
+        self.tabs.addTab(self.opt_tab, "포맷 옵션")
+        self.tabs.addTab(self._build_analysis_tab(), "자동 분석")
+
+        # Right: output
+        self.text = QPlainTextEdit()
+        self.text.setReadOnly(True)
+        self.text.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.text.setFont(mono_font())
+        self.text.setMaximumBlockCount(0)
+        self.text.cursorPositionChanged.connect(self._on_text_cursor)
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["항목", "값", "오프셋", "길이"])
+        self.tree.header().setSectionResizeMode(0, QHeaderView.Interactive)
+        self.tree.setColumnWidth(0, 260)
+        self.tree.setColumnWidth(1, 300)
+        self.tree.itemExpanded.connect(self._on_tree_expand)
+        self.tree.currentItemChanged.connect(self._on_tree_current)
+        out = QTabWidget()
+        out.addTab(self.text, "텍스트")
+        out.addTab(self.tree, "트리")
+
+        main = QSplitter(Qt.Horizontal)
+        main.addWidget(left)
+        main.addWidget(self.tabs)
+        main.addWidget(out)
+        hw = self.hex.preferred_width()
+        main.setSizes([hw, 460, max(400, 1600 - hw - 460)])
+        self.setCentralWidget(main)
+        self.stats_label = QLabel()
+        self.statusBar().addPermanentWidget(self.stats_label)
+
+    def _build_rules_tab(self) -> QWidget:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        form = QFormLayout()
+        self.rs_name = QLineEdit()
+        self.rs_endian = QComboBox()
+        self.rs_endian.addItem("리틀 엔디언", "little")
+        self.rs_endian.addItem("빅 엔디언", "big")
+        self.rs_enc = QComboBox()
+        self.rs_enc.setEditable(True)
+        self.rs_enc.addItems(ENCODINGS)
+        self.rs_unknown = QComboBox()
+        for k, v in UNKNOWN_MODES.items():
+            self.rs_unknown.addItem(v, k)
+        form.addRow("규칙 세트 이름", self.rs_name)
+        form.addRow("기본 엔디언", self.rs_endian)
+        form.addRow("기본 문자 인코딩", self.rs_enc)
+        form.addRow("규칙에 없는 byte", self.rs_unknown)
+        lay.addLayout(form)
+        self.rs_name.editingFinished.connect(self._rs_settings_changed)
+        self.rs_endian.currentIndexChanged.connect(self._rs_settings_changed)
+        self.rs_enc.currentTextChanged.connect(self._rs_settings_changed)
+        self.rs_unknown.currentIndexChanged.connect(self._rs_settings_changed)
+
+        self.rule_table = QTableWidget(0, 5)
+        self.rule_table.setHorizontalHeaderLabels(["사용", "태그", "이름", "동작", "필드 / 메모"])
+        self.rule_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.rule_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.rule_table.verticalHeader().hide()
+        hh = self.rule_table.horizontalHeader()
+        hh.setStretchLastSection(True)
+        for c, wd in ((0, 40), (1, 80), (2, 110), (3, 110)):
+            self.rule_table.setColumnWidth(c, wd)
+        self.rule_table.itemChanged.connect(self._on_rule_item_changed)
+        self.rule_table.itemDoubleClicked.connect(lambda *_: self.edit_rule())
+        lay.addWidget(self.rule_table, 1)
+
+        row1 = QHBoxLayout()
+        for text, fn in (("추가", self.add_rule), ("편집", self.edit_rule), ("복제", self.dup_rule),
+                         ("삭제", self.del_rule), ("▲", lambda: self.move_rule(-1)), ("▼", lambda: self.move_rule(1))):
+            b = QPushButton(text)
+            b.clicked.connect(fn)
+            row1.addWidget(b)
+        lay.addLayout(row1)
+        row2 = QHBoxLayout()
+        for text, fn in (("불러오기…", self.load_rules), ("저장", self.save_rules),
+                         ("다른 이름으로…", lambda: self.save_rules(True)), ("예시 규칙", self.example_rules),
+                         ("새 규칙 세트", self.new_rules)):
+            b = QPushButton(text)
+            b.clicked.connect(fn)
+            row2.addWidget(b)
+        lay.addLayout(row2)
+        hint = QLabel("팁: 왼쪽 hex 에서 바이트를 선택하고 우클릭 → 태그로 규칙 추가. "
+                      "규칙을 바꾸면 결과가 바로 다시 해석됩니다. 주황색 = 아직 규칙이 없는 byte.")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+        return w
+
+    def _build_analysis_tab(self) -> QWidget:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        top = QHBoxLayout()
+        b = QPushButton("분석 실행 (F6)")
+        b.clicked.connect(self.run_analysis)
+        top.addWidget(b)
+        self.an_status = QLabel("파일을 연 뒤 실행하세요.")
+        top.addWidget(self.an_status, 1)
+        lay.addLayout(top)
+
+        split = QSplitter(Qt.Vertical)
+        self.an_summary = QPlainTextEdit()
+        self.an_summary.setReadOnly(True)
+        self.an_summary.setFont(mono_font())
+        split.addWidget(self.an_summary)
+
+        g1 = QGroupBox("내장 포맷 적합도 (높을수록 파일을 많이 설명함)")
+        l1 = QVBoxLayout(g1)
+        self.an_formats = QTableWidget(0, 4)
+        self.an_formats.setHorizontalHeaderLabels(["점수", "포맷", "옵션", "첫 오류"])
+        self.an_formats.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.an_formats.verticalHeader().hide()
+        self.an_formats.horizontalHeader().setStretchLastSection(True)
+        self.an_formats.itemDoubleClicked.connect(lambda *_: self._apply_format_suggestion())
+        l1.addWidget(self.an_formats)
+        bf = QPushButton("선택한 포맷으로 해석")
+        bf.clicked.connect(self._apply_format_suggestion)
+        l1.addWidget(bf)
+        split.addWidget(g1)
+
+        g2 = QGroupBox("태그 후보 → 규칙 제안 (문자열 앞에 반복해서 나오는 byte)")
+        l2 = QVBoxLayout(g2)
+        self.an_sugg = QTableWidget(0, 4)
+        self.an_sugg.setHorizontalHeaderLabels(["태그", "종류", "횟수", "예"])
+        self.an_sugg.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.an_sugg.verticalHeader().hide()
+        self.an_sugg.horizontalHeader().setStretchLastSection(True)
+        l2.addWidget(self.an_sugg)
+        bs = QPushButton("선택한 제안을 규칙에 추가")
+        bs.clicked.connect(self._apply_rule_suggestions)
+        l2.addWidget(bs)
+        split.addWidget(g2)
+
+        g3 = QGroupBox("문자열 (더블클릭 → hex 위치로 이동)")
+        l3 = QVBoxLayout(g3)
+        self.an_strings = QTableWidget(0, 4)
+        self.an_strings.setHorizontalHeaderLabels(["오프셋", "인코딩", "앞 byte", "텍스트"])
+        self.an_strings.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.an_strings.verticalHeader().hide()
+        self.an_strings.horizontalHeader().setStretchLastSection(True)
+        self.an_strings.setFont(mono_font())
+        self.an_strings.itemDoubleClicked.connect(self._jump_string)
+        l3.addWidget(self.an_strings)
+        split.addWidget(g3)
+        split.setSizes([150, 200, 200, 250])
+        lay.addWidget(split, 1)
+        return w
+
+    # ------------------------------------------------------------ files
+    def open_dialog(self) -> None:
+        p, _ = QFileDialog.getOpenFileName(self, "바이너리 파일 열기", self.settings.value("last_dir", ""))
+        if p:
+            self.open_file(p)
+
+    def open_file(self, p: str) -> None:
+        try:
+            raw = Path(p).read_bytes()
+        except OSError as e:
+            QMessageBox.warning(self, "열기 실패", str(e))
+            return
+        self.path = Path(p)
+        self.settings.setValue("last_dir", str(self.path.parent))
+        self.raw = raw
+        self.pre.blockSignals(True)
+        self.pre.setCurrentIndex(0)
+        self.pre.blockSignals(False)
+        self.report = None
+        self.an_status.setText("F6 또는 '분석 실행'으로 이 파일을 분석할 수 있습니다.")
+        self._set_data(raw)
+        self.setWindowTitle(f"{self.path.name} — BinaryToText {__version__}")
+
+    def _set_data(self, data: bytes) -> None:
+        self.data = data
+        self.hex.set_data(data)
+        if data:
+            self.inspector.show_at(data, 0)
+        self.decode()
+
+    def _apply_preprocess(self) -> None:
+        kind = self.pre.currentData()
+        try:
+            data = preprocess.apply(self.raw, kind, self.pre_arg.text().strip())
+        except Exception as e:
+            QMessageBox.warning(self, "전처리 실패", f"{preprocess.TRANSFORMS[kind]}: {e}")
+            self.pre.blockSignals(True)
+            self.pre.setCurrentIndex(0)
+            self.pre.blockSignals(False)
+            data = self.raw
+        self._set_data(data)
+        if kind != "none":
+            self.statusBar().showMessage(f"전처리 '{preprocess.TRANSFORMS[kind]}' 적용: "
+                                         f"{len(self.raw):,} → {len(data):,} byte (오프셋은 변환 후 기준)")
+
+    def dragEnterEvent(self, e) -> None:
+        if e.mimeData().hasUrls():
+            e.acceptProposedAction()
+
+    def dropEvent(self, e) -> None:
+        urls = e.mimeData().urls()
+        if urls:
+            p = urls[0].toLocalFile()
+            if p.lower().endswith(".json") and self._looks_like_rules(p):
+                self._load_rules_path(p)
+            else:
+                self.open_file(p)
+
+    @staticmethod
+    def _looks_like_rules(p: str) -> bool:
+        try:
+            import json
+            d = json.loads(Path(p).read_text(encoding="utf-8"))
+            return isinstance(d, dict) and "rules" in d
+        except Exception:
+            return False
+
+    def _render_full(self) -> tuple[Node, str] | None:
+        if not self.data and not self.path:
+            QMessageBox.information(self, "저장", "먼저 파일을 여세요.")
+            return None
+        mode = self.mode.currentData()
+        root = (RuleEngine(self.ruleset).decode(self.data) if mode == RULES_MODE
+                else REGISTRY[mode].decode(self.data, self._current_opts()))
+        return root, mode
+
+    def save_text(self) -> None:
+        r = self._render_full()
+        if not r:
+            return
+        root, _ = r
+        default = str(self.path.with_suffix(self.path.suffix + ".txt")) if self.path else ""
+        p, _ = QFileDialog.getSaveFileName(self, "텍스트로 저장", default, "텍스트 (*.txt);;모든 파일 (*)")
+        if p:
+            text = render_text(root, self.data, self._render_opts())
+            Path(p).write_text(text, encoding="utf-8")
+            self.statusBar().showMessage(f"저장: {p} ({text.count(chr(10)):,}줄)")
+
+    def save_json(self) -> None:
+        r = self._render_full()
+        if not r:
+            return
+        default = str(self.path.with_suffix(self.path.suffix + ".json")) if self.path else ""
+        p, _ = QFileDialog.getSaveFileName(self, "JSON으로 저장", default, "JSON (*.json)")
+        if p:
+            Path(p).write_text(render_json(r[0]), encoding="utf-8")
+            self.statusBar().showMessage(f"저장: {p}")
+
+    # ------------------------------------------------------------ decode
+    def _render_opts(self) -> RenderOptions:
+        return RenderOptions(offsets=self.chk_offsets.isChecked(), raw_hex=self.chk_raw.isChecked())
+
+    def _current_opts(self) -> dict:
+        mode = self.mode.currentData()
+        if mode == RULES_MODE:
+            return {}
+        return self.format_opts.setdefault(mode, REGISTRY[mode].defaults())
+
+    def schedule(self, *_) -> None:
+        self.decode_timer.start()
+
+    def decode(self) -> None:
+        self.decode_timer.stop()
+        self.gen += 1
+        mode = self.mode.currentData()
+        job = DecodeJob(self.gen, self.data, mode, copy.deepcopy(self.ruleset), dict(self._current_opts()),
+                        self._render_opts())
+        job.done.connect(self._on_decoded)
+        job.finished.connect(lambda j=job: self.jobs.remove(j) if j in self.jobs else None)
+        self.jobs.append(job)
+        self.stats_label.setText("해석 중…")
+        job.start()
+
+    def _on_decoded(self, gen: int, res: dict) -> None:
+        if gen != self.gen:
+            return  # a newer request is pending
+        if "error" in res:
+            self.text.setPlainText("내부 오류가 발생했습니다:\n\n" + res["error"])
+            self.stats_label.setText("오류")
+            return
+        self.result = res
+        self.node_line = {}
+        for i, n in enumerate(res["lines"]):
+            self.node_line.setdefault(id(n), i)
+        self._syncing = True
+        self.text.setPlainText(res["text"])
+        self._syncing = False
+        self.hex.model_.set_marks(res["marks"])
+        self._fill_tree(res["root"])
+        st = res["stats"]
+        self.stats_label.setText(
+            f"해석 {st.coverage:.1%} · 미해석 {st.unknown:,} byte · 오류 {st.errors} · 항목 {st.nodes:,} · "
+            f"{len(self.data):,} byte · {res['elapsed']:.2f}s")
+
+    # ------------------------------------------------------------ tree
+    def _fill_tree(self, root: Node) -> None:
+        self.tree.clear()
+        self._tree_nodes: dict[int, Node] = {}
+        self._add_tree_children(self.tree.invisibleRootItem(), root)
+
+    def _add_tree_children(self, parent_item, node: Node, cap: int = 5000) -> None:
+        for i, c in enumerate(node.children):
+            if i >= cap:
+                more = QTreeWidgetItem([f"… 외 {len(node.children) - cap:,}개 (텍스트 탭에서 확인)"])
+                parent_item.addChild(more)
+                break
+            label = c.label
+            if c.kind == UNKNOWN:
+                label = f"?? {c.label}"
+            elif c.kind == ERROR:
+                label = f"!! {c.label}"
+            it = QTreeWidgetItem([label, c.value + (f"  ({c.note})" if c.note else ""),
+                                  f"0x{c.offset:X}", str(c.length)])
+            it.setData(0, Qt.UserRole, id(c))
+            self._tree_nodes[id(c)] = c
+            if c.kind == UNKNOWN:
+                it.setForeground(0, QColor(220, 120, 0))
+            elif c.kind == ERROR:
+                it.setForeground(0, QColor(220, 40, 40))
+            if c.children:
+                it.addChild(QTreeWidgetItem(["…"]))  # placeholder until expanded
+            parent_item.addChild(it)
+
+    def _on_tree_expand(self, item: QTreeWidgetItem) -> None:
+        if item.childCount() == 1 and item.child(0).data(0, Qt.UserRole) is None and item.child(0).text(0) == "…":
+            item.takeChild(0)
+            node = self._tree_nodes.get(item.data(0, Qt.UserRole))
+            if node:
+                self._add_tree_children(item, node)
+
+    def _on_tree_current(self, item, _prev) -> None:
+        if item is None:
+            return
+        node = self._tree_nodes.get(item.data(0, Qt.UserRole))
+        if node:
+            self.hex.highlight(node.offset, node.end)
+            self.inspector.show_at(self.data, node.offset) if node.offset < len(self.data) else None
+
+    # ------------------------------------------------------------ linking
+    def _on_text_cursor(self) -> None:
+        if self._syncing or not self.result:
+            return
+        line = self.text.textCursor().blockNumber()
+        lines = self.result["lines"]
+        if 0 <= line < len(lines):
+            n = lines[line]
+            if n.kind != GROUP or n.length:
+                self._syncing = True
+                self.hex.highlight(n.offset, n.end)
+                self._syncing = False
+            self._mark_text_line()
+
+    def _mark_text_line(self) -> None:
+        sel = QTextEdit.ExtraSelection()
+        sel.format.setBackground(QColor(40, 120, 255, 50))
+        sel.format.setProperty(QTextFormat.FullWidthSelection, True)
+        sel.cursor = self.text.textCursor()
+        sel.cursor.clearSelection()
+        self.text.setExtraSelections([sel])
+
+    def _on_hex_cursor(self, off: int) -> None:
+        self.inspector.show_at(self.data, off)
+        if self._syncing or not self.result:
+            return
+        n = deepest_at(self.result["root"], off)
+        if n is None or n is self.result["root"]:
+            return
+        line = self.node_line.get(id(n))
+        self.statusBar().showMessage(f"0x{off:X}: {n.label} {n.value}"[:200])
+        if line is not None:
+            self._syncing = True
+            block = self.text.document().findBlockByNumber(line)
+            cur = QTextCursor(block)
+            self.text.setTextCursor(cur)
+            self.text.centerCursor()
+            self._mark_text_line()
+            self._syncing = False
+            self.hex.model_.set_highlight(n.offset, max(n.end, n.offset + 1))
+
+    # ------------------------------------------------------------ mode / options
+    def _on_mode_changed(self, *_) -> None:
+        mode = self.mode.currentData()
+        self.settings.setValue("mode", mode)
+        self._build_option_form(mode)
+        if mode != RULES_MODE and self.tabs.currentIndex() == 0:
+            self.tabs.setCurrentIndex(1)
+        elif mode == RULES_MODE and self.tabs.currentIndex() == 1:
+            self.tabs.setCurrentIndex(0)
+        self.schedule()
+
+    def _build_option_form(self, mode: str) -> None:
+        while self.opt_layout.count():
+            item = self.opt_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        if mode == RULES_MODE:
+            lbl = QLabel("지금은 '사용자 규칙' 모드입니다. 내장 포맷을 쓰려면 위의 '해석 방식'에서 고르세요.")
+            lbl.setWordWrap(True)
+            self.opt_layout.addWidget(lbl)
+            self.opt_layout.addStretch()
+            return
+        dec = REGISTRY[mode]
+        opts = self._current_opts()
+        title = QLabel(f"<b>{dec.title}</b><br>{dec.description}")
+        title.setWordWrap(True)
+        self.opt_layout.addWidget(title)
+        box = QWidget()
+        form = QFormLayout(box)
+        for o in dec.options:
+            if o.kind == "choice":
+                w = QComboBox()
+                for val, label in o.choices:
+                    w.addItem(label, val)
+                idx = next((i for i, (v, _) in enumerate(o.choices) if v == opts.get(o.key)), 0)
+                w.setCurrentIndex(idx)
+                w.currentIndexChanged.connect(lambda _i, k=o.key, w=w: self._set_opt(k, w.currentData()))
+            elif o.kind == "int":
+                w = QSpinBox()
+                w.setRange(o.minimum, o.maximum)
+                w.setValue(int(opts.get(o.key, o.default)))
+                w.valueChanged.connect(lambda v, k=o.key: self._set_opt(k, v))
+            else:
+                w = QCheckBox()
+                w.setChecked(bool(opts.get(o.key, o.default)))
+                w.toggled.connect(lambda v, k=o.key: self._set_opt(k, v))
+            form.addRow(o.label, w)
+        self.opt_layout.addWidget(box)
+        reset = QPushButton("기본값으로")
+        reset.clicked.connect(lambda: self._reset_opts(mode))
+        self.opt_layout.addWidget(reset)
+        self.opt_layout.addStretch()
+
+    def _set_opt(self, key, value) -> None:
+        self._current_opts()[key] = value
+        self.schedule()
+
+    def _reset_opts(self, mode: str) -> None:
+        self.format_opts[mode] = REGISTRY[mode].defaults()
+        self._build_option_form(mode)
+        self.schedule()
+
+    # ------------------------------------------------------------ rules
+    def _restore_ruleset(self) -> RuleSet:
+        js = self.settings.value("ruleset_json")
+        if js:
+            try:
+                import json
+                return RuleSet.from_dict(json.loads(js))
+            except Exception:
+                pass
+        return example_ruleset()
+
+    def _rules_changed(self) -> None:
+        self.settings.setValue("ruleset_json", self.ruleset.to_json())
+        self._refresh_rule_table()
+        if self.mode.currentData() != RULES_MODE:
+            self.mode.setCurrentIndex(0)  # editing rules implies rule mode
+        self.schedule()
+
+    def _refresh_rule_table(self) -> None:
+        rs = self.ruleset
+        for w, v in ((self.rs_name, rs.name),):
+            w.blockSignals(True)
+            w.setText(v)
+            w.blockSignals(False)
+        for c, v in ((self.rs_endian, rs.endian), (self.rs_unknown, rs.unknown)):
+            c.blockSignals(True)
+            c.setCurrentIndex(max(0, c.findData(v)))
+            c.blockSignals(False)
+        self.rs_enc.blockSignals(True)
+        self.rs_enc.setEditText(rs.encoding)
+        self.rs_enc.blockSignals(False)
+
+        t = self.rule_table
+        row = t.currentRow()
+        t.blockSignals(True)
+        t.setRowCount(len(rs.rules))
+        for i, r in enumerate(rs.rules):
+            chk = QTableWidgetItem()
+            chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            chk.setCheckState(Qt.Checked if r.enabled else Qt.Unchecked)
+            t.setItem(i, 0, chk)
+            tag = _ro_item(r.tag)
+            tag.setFont(mono_font())
+            t.setItem(i, 1, tag)
+            t.setItem(i, 2, _ro_item(r.name))
+            t.setItem(i, 3, _ro_item(ACTIONS.get(r.action, r.action)))
+            desc = r.fields_summary()
+            if r.comment:
+                desc = f"{desc}  — {r.comment}" if desc else r.comment
+            t.setItem(i, 4, _ro_item(desc))
+        t.blockSignals(False)
+        if 0 <= row < t.rowCount():
+            t.selectRow(row)
+
+    def _rs_settings_changed(self, *_) -> None:
+        rs = self.ruleset
+        rs.name = self.rs_name.text().strip() or rs.name
+        rs.endian = self.rs_endian.currentData()
+        rs.encoding = self.rs_enc.currentText().strip() or "ascii"
+        rs.unknown = self.rs_unknown.currentData()
+        self.settings.setValue("ruleset_json", rs.to_json())
+        if self.mode.currentData() == RULES_MODE:
+            self.schedule()
+
+    def _on_rule_item_changed(self, item: QTableWidgetItem) -> None:
+        if item.column() == 0 and 0 <= item.row() < len(self.ruleset.rules):
+            self.ruleset.rules[item.row()].enabled = item.checkState() == Qt.Checked
+            self._rules_changed()
+
+    def _edit_dialog(self, rule: Rule) -> Rule | None:
+        dlg = RuleDialog(self, rule, self.ruleset, self.data)
+        return dlg.rule if dlg.exec() else None
+
+    def add_rule(self, tag: str = "") -> None:
+        r = self._edit_dialog(Rule(tag, "", "value", [FieldSpec("uint", size=1)]))
+        if r:
+            self.ruleset.rules.append(r)
+            self._rules_changed()
+            self.rule_table.selectRow(len(self.ruleset.rules) - 1)
+
+    def _add_rule_from_bytes(self, b: bytes) -> None:
+        self.tabs.setCurrentIndex(0)
+        self.add_rule(b.hex(" ").upper())
+
+    def edit_rule(self) -> None:
+        i = self.rule_table.currentRow()
+        if 0 <= i < len(self.ruleset.rules):
+            r = self._edit_dialog(self.ruleset.rules[i])
+            if r:
+                self.ruleset.rules[i] = r
+                self._rules_changed()
+
+    def dup_rule(self) -> None:
+        i = self.rule_table.currentRow()
+        if 0 <= i < len(self.ruleset.rules):
+            self.ruleset.rules.insert(i + 1, copy.deepcopy(self.ruleset.rules[i]))
+            self._rules_changed()
+            self.rule_table.selectRow(i + 1)
+
+    def del_rule(self) -> None:
+        rows = sorted({ix.row() for ix in self.rule_table.selectedIndexes()}, reverse=True)
+        for i in rows:
+            del self.ruleset.rules[i]
+        if rows:
+            self._rules_changed()
+
+    def move_rule(self, d: int) -> None:
+        i = self.rule_table.currentRow()
+        j = i + d
+        rules = self.ruleset.rules
+        if 0 <= i < len(rules) and 0 <= j < len(rules):
+            rules[i], rules[j] = rules[j], rules[i]
+            self._rules_changed()
+            self.rule_table.selectRow(j)
+
+    def load_rules(self) -> None:
+        p, _ = QFileDialog.getOpenFileName(self, "규칙 불러오기", self.settings.value("rules_dir", ""),
+                                           "규칙 JSON (*.json)")
+        if p:
+            self._load_rules_path(p)
+
+    def _load_rules_path(self, p: str) -> None:
+        try:
+            self.ruleset = RuleSet.load(p)
+        except Exception as e:
+            QMessageBox.warning(self, "불러오기 실패", str(e))
+            return
+        self.rules_path = Path(p)
+        self.settings.setValue("rules_dir", str(self.rules_path.parent))
+        self._rules_changed()
+        self.statusBar().showMessage(f"규칙 불러옴: {p}")
+
+    def save_rules(self, save_as: bool = False) -> None:
+        p = self.rules_path
+        if save_as or p is None:
+            default = str(self.rules_path or Path(self.settings.value("rules_dir", "")) / f"{self.ruleset.name}.json")
+            s, _ = QFileDialog.getSaveFileName(self, "규칙 저장", default, "규칙 JSON (*.json)")
+            if not s:
+                return
+            p = Path(s)
+        self.ruleset.save(p)
+        self.rules_path = p
+        self.settings.setValue("rules_dir", str(p.parent))
+        self.statusBar().showMessage(f"규칙 저장: {p}")
+
+    def example_rules(self) -> None:
+        if self._confirm_replace():
+            self.ruleset = example_ruleset()
+            self.rules_path = None
+            self._rules_changed()
+
+    def new_rules(self) -> None:
+        if self._confirm_replace():
+            self.ruleset = RuleSet()
+            self.rules_path = None
+            self._rules_changed()
+
+    def _confirm_replace(self) -> bool:
+        if not self.ruleset.rules:
+            return True
+        return QMessageBox.question(self, "규칙 바꾸기", "현재 규칙을 바꿉니다. 저장하지 않은 규칙은 사라집니다. 계속할까요?") \
+            == QMessageBox.Yes
+
+    # ------------------------------------------------------------ analysis
+    def run_analysis(self) -> None:
+        if not self.data:
+            QMessageBox.information(self, "자동 분석", "먼저 파일을 여세요.")
+            return
+        self.tabs.setCurrentIndex(2)
+        self.an_status.setText("분석 중… (모든 내장 포맷을 시도합니다)")
+        job = AnalyzeJob(self.data)
+        job.done.connect(self._on_analyzed)
+        job.finished.connect(lambda j=job: self.jobs.remove(j) if j in self.jobs else None)
+        self.jobs.append(job)
+        job.start()
+
+    def _on_analyzed(self, rep) -> None:
+        if isinstance(rep, str):
+            self.an_status.setText("분석 중 오류")
+            self.an_summary.setPlainText(rep)
+            return
+        self.report = rep
+        self.an_status.setText(f"완료: 문자열 {len(rep.strings):,}개, 태그 후보 {len(rep.suggestions)}개")
+        summary = heuristics.report_text(heuristics.Report(
+            rep.size, rep.entropy, rep.entropy_blocks, rep.magic, rep.transforms, [], [], rep.periods, [],
+            rep.top_bytes))
+        if rep.transforms:
+            summary += "→ 위 툴바의 '전처리'에서 선택하면 변환된 데이터로 해석합니다.\n"
+        self.an_summary.setPlainText(summary.replace("== 문자열 0개 (처음 50개) ==\n", ""))
+
+        t = self.an_formats
+        t.setRowCount(len(rep.formats))
+        for i, f in enumerate(rep.formats):
+            t.setItem(i, 0, _ro_item(f"{f.score:.1%}", i))
+            t.setItem(i, 1, _ro_item(f.title))
+            t.setItem(i, 2, _ro_item(", ".join(f"{k}={v}" for k, v in f.options.items())))
+            t.setItem(i, 3, _ro_item(f.first_error))
+        t.resizeColumnsToContents()
+
+        s = self.an_sugg
+        s.setRowCount(len(rep.suggestions))
+        for i, g in enumerate(rep.suggestions):
+            s.setItem(i, 0, _ro_item(g.tag, i))
+            s.setItem(i, 1, _ro_item(g.kind))
+            s.setItem(i, 2, _ro_item(g.count))
+            s.setItem(i, 3, _ro_item(", ".join(repr(e) for e in g.examples)))
+        s.resizeColumnsToContents()
+
+        st = self.an_strings
+        shown = rep.strings[:20000]
+        st.setRowCount(len(shown))
+        for i, x in enumerate(shown):
+            st.setItem(i, 0, _ro_item(f"{x.offset:08X}", x.offset))
+            st.setItem(i, 1, _ro_item(x.encoding))
+            prev = self.data[max(0, x.offset - 3):x.offset].hex(" ").upper()
+            st.setItem(i, 2, _ro_item(prev))
+            st.setItem(i, 3, _ro_item(x.text[:200] + ("  ⏎00" if x.terminated else "")))
+        st.resizeColumnToContents(0)
+        st.resizeColumnToContents(1)
+        st.resizeColumnToContents(2)
+
+    def _apply_format_suggestion(self) -> None:
+        if not self.report:
+            return
+        row = self.an_formats.currentRow()
+        if not 0 <= row < len(self.report.formats):
+            return
+        f = self.report.formats[row]
+        opts = REGISTRY[f.key].defaults()
+        opts.update(f.options)
+        self.format_opts[f.key] = opts
+        self.mode.setCurrentIndex(self.mode.findData(f.key))
+        self._build_option_form(f.key)
+        self.decode()
+
+    def _apply_rule_suggestions(self) -> None:
+        if not self.report:
+            return
+        rows = sorted({ix.row() for ix in self.an_sugg.selectedIndexes()})
+        existing = {r.tag.replace(" ", "").upper() for r in self.ruleset.rules}
+        added = 0
+        for i in rows:
+            r = copy.deepcopy(self.report.suggestions[i].rule)
+            if r.tag.upper() in existing:
+                continue
+            existing.add(r.tag.upper())
+            self.ruleset.rules.append(r)
+            added += 1
+        if added:
+            self._rules_changed()
+            self.mode.setCurrentIndex(0)
+        self.statusBar().showMessage(f"규칙 {added}개 추가" + ("" if added == len(rows) else " (같은 태그는 건너뜀)"))
+
+    def _jump_string(self, item: QTableWidgetItem) -> None:
+        off = self.an_strings.item(item.row(), 0).data(Qt.UserRole)
+        if off is not None:
+            self.hex.go_to(off)
+
+    # ------------------------------------------------------------ close
+    def closeEvent(self, e) -> None:
+        self.settings.setValue("geometry", self.saveGeometry())
+        self.settings.setValue("offsets", self.chk_offsets.isChecked())
+        self.settings.setValue("raw_hex", self.chk_raw.isChecked())
+        self.settings.setValue("ruleset_json", self.ruleset.to_json())
+        for j in list(self.jobs):
+            j.wait(2000)
+        super().closeEvent(e)

@@ -1,0 +1,26 @@
+[project]
+name = "binarytotext"
+dynamic = ["version"]
+description = "알 수 없는 바이너리 파일을 사람이 읽을 수 있는 텍스트로 변환하는 오프라인 데스크톱 앱"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = ["PySide6>=6.6"]
+
+[project.scripts]
+btt = "binarytotext.cli:main"
+
+[project.gui-scripts]
+binarytotext = "binarytotext.gui.app:run"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+version = { attr = "binarytotext.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["binarytotext*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

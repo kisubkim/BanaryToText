@@ -1,0 +1,59 @@
+{
+  "name": "예시 규칙",
+  "endian": "little",
+  "encoding": "ascii",
+  "unknown": "hex",
+  "rules": [
+    {
+      "tag": "09",
+      "name": "문자열",
+      "action": "value",
+      "fields": [
+        {
+          "type": "cstring",
+          "name": "",
+          "size": 1,
+          "endian": "",
+          "encoding": "",
+          "terminator": "00",
+          "len_size": "1",
+          "fmt": "dec",
+          "map": {}
+        }
+      ],
+      "enabled": true,
+      "comment": "09 다음부터 00 까지 ASCII 문자열",
+      "bracket": "["
+    },
+    {
+      "tag": "04",
+      "name": "정수",
+      "action": "value",
+      "fields": [
+        {
+          "type": "uint",
+          "name": "",
+          "size": 1,
+          "endian": "",
+          "encoding": "",
+          "terminator": "00",
+          "len_size": "1",
+          "fmt": "dec",
+          "map": {}
+        }
+      ],
+      "enabled": true,
+      "comment": "04 다음 1 byte 정수",
+      "bracket": "["
+    },
+    {
+      "tag": "0A",
+      "name": "배열",
+      "action": "toggle",
+      "fields": [],
+      "enabled": true,
+      "comment": "0A 로 열고 다시 0A 로 닫음",
+      "bracket": "["
+    }
+  ]
+}

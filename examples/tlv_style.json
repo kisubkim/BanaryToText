@@ -1,0 +1,167 @@
+{
+  "name": "TLV 스타일 예시",
+  "endian": "big",
+  "encoding": "cp949",
+  "unknown": "hex",
+  "rules": [
+    {
+      "tag": "01",
+      "name": "레코드",
+      "action": "len_block",
+      "fields": [
+        {
+          "type": "uint",
+          "name": "",
+          "size": 2,
+          "endian": "",
+          "encoding": "",
+          "terminator": "00",
+          "len_size": "1",
+          "fmt": "dec",
+          "map": {}
+        }
+      ],
+      "enabled": true,
+      "comment": "01 + 2byte 길이, 안쪽은 다시 규칙으로 해석",
+      "bracket": "{"
+    },
+    {
+      "tag": "10",
+      "name": "이름",
+      "action": "value",
+      "fields": [
+        {
+          "type": "pstring",
+          "name": "",
+          "size": 1,
+          "endian": "",
+          "encoding": "",
+          "terminator": "00",
+          "len_size": "1",
+          "fmt": "dec",
+          "map": {}
+        }
+      ],
+      "enabled": true,
+      "comment": "1byte 길이 + CP949 문자열",
+      "bracket": "["
+    },
+    {
+      "tag": "11",
+      "name": "나이",
+      "action": "value",
+      "fields": [
+        {
+          "type": "uint",
+          "name": "",
+          "size": 1,
+          "endian": "",
+          "encoding": "",
+          "terminator": "00",
+          "len_size": "1",
+          "fmt": "dec",
+          "map": {}
+        }
+      ],
+      "enabled": true,
+      "comment": "",
+      "bracket": "["
+    },
+    {
+      "tag": "12",
+      "name": "상태",
+      "action": "value",
+      "fields": [
+        {
+          "type": "uint",
+          "name": "",
+          "size": 1,
+          "endian": "",
+          "encoding": "",
+          "terminator": "00",
+          "len_size": "1",
+          "fmt": "dec",
+          "map": {
+            "0": "비활성",
+            "1": "활성"
+          }
+        }
+      ],
+      "enabled": true,
+      "comment": "",
+      "bracket": "["
+    },
+    {
+      "tag": "13",
+      "name": "가입일",
+      "action": "value",
+      "fields": [
+        {
+          "type": "unixtime",
+          "name": "",
+          "size": 4,
+          "endian": "",
+          "encoding": "",
+          "terminator": "00",
+          "len_size": "1",
+          "fmt": "dec",
+          "map": {}
+        }
+      ],
+      "enabled": true,
+      "comment": "",
+      "bracket": "["
+    },
+    {
+      "tag": "20",
+      "name": "태그 목록",
+      "action": "count_block",
+      "fields": [
+        {
+          "type": "uint",
+          "name": "",
+          "size": 1,
+          "endian": "",
+          "encoding": "",
+          "terminator": "00",
+          "len_size": "1",
+          "fmt": "dec",
+          "map": {}
+        }
+      ],
+      "enabled": true,
+      "comment": "1byte 개수 + 항목들",
+      "bracket": "["
+    },
+    {
+      "tag": "21",
+      "name": "태그",
+      "action": "value",
+      "fields": [
+        {
+          "type": "cstring",
+          "name": "",
+          "size": 1,
+          "endian": "",
+          "encoding": "utf-8",
+          "terminator": "00",
+          "len_size": "1",
+          "fmt": "dec",
+          "map": {}
+        }
+      ],
+      "enabled": true,
+      "comment": "",
+      "bracket": "["
+    },
+    {
+      "tag": "FF",
+      "name": "파일 끝",
+      "action": "end",
+      "fields": [],
+      "enabled": true,
+      "comment": "",
+      "bracket": "["
+    }
+  ]
+}
