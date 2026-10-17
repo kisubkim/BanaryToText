@@ -21,11 +21,30 @@ def render(data, rs, **opts):
 def test_key_value_pairs_and_alternation():
     data = b"\x09volume\x00\x04\x1e\x09mode\x00\x09auto\x00\x09list\x00\x0a\x04\x01\x04\x02\x0a"
     text = render(data, kv_rules())
-    assert text.splitlines()[:3] == ["volume = 30", 'mode = "auto"', "list = ["]
+    assert text.splitlines()[:3] == ["volume = 30", "mode = auto", "list = ["]
     root = decode_with_rules(data, kv_rules())
     first = root.children[0]
     assert (first.offset, first.length, first.key) == (0, 10, True)  # span covers key and value
     assert '"key": true' in render_json(root)
+    assert '"value": "\\"auto\\""' in render_json(root)  # JSON keeps the quoted string
+
+
+def test_key_string_values_lose_only_their_own_quotes():
+    rs = kv_rules()
+    rs.rules.append(Rule("0D", "둘", fields=[FieldSpec("cstring"), FieldSpec("cstring")]))
+    data = (b'\x09a\x00\x09say "hi"\x00' + b"\x09b\x00\x0dx\x00y\x00"
+            + b"\x09c\x00\x0a\x09p\x00\x09q\x00\x0a")
+    lines = render(data, rs, inline_arrays=True).splitlines()
+    assert lines[0] == 'a = say \\"hi\\"'  # one string: outer quotes gone, escapes stay
+    assert lines[1] == 'b = "x", "y"'  # two strings: left as is
+    assert lines[2:] == ["c = [p = q]"]  # inside the array 09 is a key again
+
+
+def test_plain_strings_keep_quotes():
+    data = b"\x09a\x00\x09b\x00"
+    rs = kv_rules()
+    rs.rules[0].key = False
+    assert render(data, rs).splitlines() == ['문자열: "a"', '문자열: "b"']
 
 
 def test_key_inside_object_and_unpaired_key():

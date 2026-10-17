@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 from .model import ERROR, GROUP, INFO, UNKNOWN, VALUE, Node
@@ -43,7 +44,7 @@ def render_text(root: Node, data: bytes, opts: RenderOptions | None = None,
     def item(n: Node) -> str:
         """A value inside a one-line array: labels dropped, keys kept."""
         v = n.value if n.value != "" else n.label
-        return f"{n.label} = {v}" if n.key else v
+        return f"{n.label} = {_unquote(v)}" if n.key else v
 
     def inline(n: Node) -> bool:
         kids = n.children
@@ -83,7 +84,7 @@ def render_text(root: Node, data: bytes, opts: RenderOptions | None = None,
         elif n.kind == INFO:
             line = f"# {n.label}" + (f": {n.value}" if n.value else "")
         elif n.key:
-            line = f"{n.label} = {n.value}"
+            line = f"{n.label} = {_unquote(n.value)}"
         elif not opts.labels:
             line = n.value if n.value != "" else n.label  # a value-less rule only has its name to show
         else:
@@ -99,6 +100,14 @@ def render_text(root: Node, data: bytes, opts: RenderOptions | None = None,
             put(root, f"… 출력이 {opts.max_lines}줄에서 잘렸습니다 (텍스트 저장 시에는 전체가 저장됩니다)")
             break
     return "\n".join(out) + ("\n" if out else "")
+
+
+_ONE_STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+
+
+def _unquote(v: str) -> str:
+    """key = "text" -> key = text. Only a single quoted string; escapes stay visible."""
+    return v[1:-1] if _ONE_STRING.fullmatch(v) else v
 
 
 def _opener(close: str) -> str:
