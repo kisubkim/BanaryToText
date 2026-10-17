@@ -1,0 +1,166 @@
+{
+  "name": "센서 로그 (BDAT)",
+  "endian": "little",
+  "encoding": "utf-8",
+  "unknown": "hex",
+  "rules": [
+    {
+      "tag": "0B",
+      "name": "센서",
+      "action": "open",
+      "fields": [],
+      "enabled": true,
+      "comment": "0B 로 열고 00 으로 닫는 객체",
+      "bracket": "{",
+      "end_tag": "00"
+    },
+    {
+      "tag": "09",
+      "name": "이름",
+      "action": "value",
+      "fields": [
+        {
+          "type": "cstring",
+          "name": "",
+          "size": 1,
+          "endian": "",
+          "encoding": "",
+          "terminator": "00",
+          "len_size": "1",
+          "fmt": "dec",
+          "map": {}
+        }
+      ],
+      "enabled": true,
+      "comment": "00 까지 문자열",
+      "bracket": "[",
+      "end_tag": ""
+    },
+    {
+      "tag": "04",
+      "name": "채널",
+      "action": "value",
+      "fields": [
+        {
+          "type": "uint",
+          "name": "",
+          "size": 1,
+          "endian": "",
+          "encoding": "",
+          "terminator": "00",
+          "len_size": "1",
+          "fmt": "dec",
+          "map": {}
+        }
+      ],
+      "enabled": true,
+      "comment": "1 byte 정수",
+      "bracket": "[",
+      "end_tag": ""
+    },
+    {
+      "tag": "05",
+      "name": "온도",
+      "action": "value",
+      "fields": [
+        {
+          "type": "float",
+          "name": "",
+          "size": 4,
+          "endian": "",
+          "encoding": "",
+          "terminator": "00",
+          "len_size": "1",
+          "fmt": "dec",
+          "map": {}
+        }
+      ],
+      "enabled": true,
+      "comment": "4 byte 실수",
+      "bracket": "[",
+      "end_tag": ""
+    },
+    {
+      "tag": "06",
+      "name": "측정 시각",
+      "action": "value",
+      "fields": [
+        {
+          "type": "unixtime",
+          "name": "",
+          "size": 4,
+          "endian": "",
+          "encoding": "",
+          "terminator": "00",
+          "len_size": "1",
+          "fmt": "dec",
+          "map": {}
+        }
+      ],
+      "enabled": true,
+      "comment": "Unix 초",
+      "bracket": "[",
+      "end_tag": ""
+    },
+    {
+      "tag": "0A",
+      "name": "기록",
+      "action": "toggle",
+      "fields": [],
+      "enabled": true,
+      "comment": "0A 로 열고 다시 0A 로 닫는 배열",
+      "bracket": "[",
+      "end_tag": ""
+    }
+  ],
+  "header": [
+    {
+      "type": "fstring",
+      "name": "매직",
+      "size": 4,
+      "endian": "",
+      "encoding": "",
+      "terminator": "00",
+      "len_size": "1",
+      "fmt": "dec",
+      "map": {}
+    },
+    {
+      "type": "uint",
+      "name": "버전",
+      "size": 2,
+      "endian": "",
+      "encoding": "",
+      "terminator": "00",
+      "len_size": "1",
+      "fmt": "dec",
+      "map": {}
+    },
+    {
+      "type": "uint",
+      "name": "센서 수",
+      "size": 1,
+      "endian": "",
+      "encoding": "",
+      "terminator": "00",
+      "len_size": "1",
+      "fmt": "dec",
+      "map": {}
+    }
+  ],
+  "footer": [
+    {
+      "type": "uint",
+      "name": "CRC32",
+      "size": 4,
+      "endian": "big",
+      "encoding": "",
+      "terminator": "00",
+      "len_size": "1",
+      "fmt": "hex",
+      "map": {}
+    }
+  ],
+  "match_pattern": "'BDAT'",
+  "match_offset": 0
+}

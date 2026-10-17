@@ -43,7 +43,7 @@ def decode_msgpack(data: bytes, opts: dict) -> Node:
             n = r.uint(1 << (b - 0xC7))
             return ext(r, pos, parent, label, n)
         if b == 0xCA:
-            return val(repr(r.float(4)), "float32")
+            return val(r.float_text(4), "float32")
         if b == 0xCB:
             return val(repr(r.float(8)), "float64")
         if 0xCC <= b <= 0xCF:

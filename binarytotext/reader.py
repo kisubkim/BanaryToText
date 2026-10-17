@@ -53,6 +53,9 @@ class Reader:
     def float(self, n: int, endian: str = "big") -> float:
         return unpack_float(self.read(n), endian)
 
+    def float_text(self, n: int, endian: str = "big") -> str:
+        return float_text(self.read(n), endian)
+
     def varint(self, max_bytes: int = 10) -> int:
         """Unsigned LEB128 (protobuf / thrift compact style)."""
         result = shift = 0
@@ -90,9 +93,17 @@ def unpack_float(b: bytes, endian: str = "big") -> float:
     raise DecodeError(f"지원하지 않는 float 크기 {len(b)}")
 
 
-def fmt_float(v: float) -> str:
-    r = repr(v)
-    return r
+def float_text(b: bytes, endian: str = "big") -> str:
+    """Shortest decimal that reads back to the same bytes (36.6, not 36.599998474121094 for float32)."""
+    v = unpack_float(b, endian)
+    if len(b) == 8 or v != v or v in (float("inf"), float("-inf")):
+        return repr(v)
+    code = (">" if endian == "big" else "<") + ("e" if len(b) == 2 else "f")
+    for digits in range(1, 18):
+        s = f"{v:.{digits}g}"
+        if struct.pack(code, float(s)) == b:
+            return repr(float(s))
+    return repr(v)
 
 
 def hexs(b: bytes, limit: int = 64) -> str:

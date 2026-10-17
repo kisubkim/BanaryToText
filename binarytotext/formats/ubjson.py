@@ -45,7 +45,7 @@ def decode_ubjson(data: bytes, opts: dict) -> Node:
         if m in INTS:
             return val(str(int_value(r, m)), m.decode())
         if m == b"d":
-            return val(repr(r.float(4)), "float32")
+            return val(r.float_text(4), "float32")
         if m == b"D":
             return val(repr(r.float(8)), "float64")
         if m == b"H":

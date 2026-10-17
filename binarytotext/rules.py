@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from .model import ERROR, GROUP, INFO, UNKNOWN, VALUE, Node
-from .reader import DecodeError, Reader, ascii_preview, hexs, quote, unix_time, unpack_float, zigzag
+from .reader import DecodeError, Reader, ascii_preview, float_text, hexs, quote, unix_time, zigzag
 
 FIELD_TYPES = {
     "uint": "부호 없는 정수",
@@ -265,7 +265,7 @@ def read_field(r: Reader, f: FieldSpec, ctx: _Ctx) -> tuple[str | None, int | No
         v = r.uint(f.size, endian) if t == "uint" else r.sint(f.size, endian)
         return _int_text(v, f, f.size), v
     if t == "float":
-        return repr(unpack_float(r.read(f.size), endian)), None
+        return float_text(r.read(f.size), endian), None
     if t == "bool":
         v = r.uint(f.size or 1, endian)
         return ("true" if v else "false") if not f.map else _int_text(v, f, f.size or 1), v

@@ -669,6 +669,7 @@ class MainWindow(QMainWindow):
         while self.opt_layout.count():
             item = self.opt_layout.takeAt(0)
             if item.widget():
+                item.widget().hide()  # deleteLater may run later; never paint the old form meanwhile
                 item.widget().deleteLater()
         if mode == RULES_MODE:
             lbl = QLabel("지금은 '사용자 규칙' 모드입니다. 내장 포맷을 쓰려면 위의 '해석 방식'에서 고르세요.")

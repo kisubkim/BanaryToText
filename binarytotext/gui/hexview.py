@@ -8,7 +8,7 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontDatabase
 from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QMenu, QTableView, QTableWidget, QTableWidgetItem
 
-from ..reader import unix_time
+from ..reader import float_text, unix_time
 
 WIDTH = 16
 ASCII_COL = WIDTH
@@ -201,8 +201,11 @@ def inspect_values(data: bytes, off: int) -> list[tuple[str, str]]:
             for e, en in (("<", "LE"), (">", "BE")):
                 if n == 1 and en == "BE":
                     continue
-                v = struct.unpack(e + fmt, b[:n])[0]
-                rows.append((f"{label}{'' if n == 1 else ' ' + en}", repr(v) if isinstance(v, float) else str(v)))
+                if fmt in "fd":
+                    text = float_text(b[:n], "little" if e == "<" else "big")
+                else:
+                    text = str(struct.unpack(e + fmt, b[:n])[0])
+                rows.append((f"{label}{'' if n == 1 else ' ' + en}", text))
 
     num("uint8", 1, "B")
     num("int8", 1, "b")

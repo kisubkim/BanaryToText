@@ -27,6 +27,10 @@ Run from this folder with the project venv.
 - `render.py`: Node tree → text (optional `line_nodes` maps each line back to a node for GUI linking) or JSON.
 - `gui/`: `main_window.py` (decoding runs in `QThread`s with a generation counter; stale results are dropped), `hexview.py` (table-model hex view + inspector), `field_editor.py` (shared FieldSpec list editor), `rule_dialog.py` (rule editor with live preview), `header_dialog.py` (header/footer).
 
+## User manual
+
+`docs/manual.md` (Korean) with screenshots in `docs/images/`. `docs/make_screenshots.py` regenerates both the sample files in `examples/manual/` and every screenshot (real Windows windows pop up briefly). After a UI change, rerun it and check that the manual text still matches the images.
+
 ## Conventions
 
 - Code comments and docstrings in English; UI strings, docs and commit messages in Korean.

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..model import GROUP, VALUE, Node
-from ..reader import DecodeError, Reader, bytes_value, quote, unpack_float
+from ..reader import DecodeError, Reader, bytes_value, float_text, quote
 from .base import Decoder, Option, map_entry, new_root, register, run_stream
 
 TAGS = {0: "날짜/시각 문자열", 1: "epoch 시각", 2: "양의 bignum", 3: "음의 bignum", 4: "decimal fraction",
@@ -48,7 +48,7 @@ def decode_cbor(data: bytes, opts: dict) -> Node:
                 v = r.u8()
                 return val(SIMPLE.get(v, f"simple({v})"))
             if info in (25, 26, 27):
-                return val(repr(unpack_float(r.read(1 << (info - 24)), "big")),
+                return val(float_text(r.read(1 << (info - 24)), "big"),
                            {25: "half", 26: "float", 27: "double"}[info])
             raise DecodeError(f"예약된 simple/float 형식 {info}", pos)
         n = arg(r, info, pos)
