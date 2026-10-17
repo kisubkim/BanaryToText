@@ -630,9 +630,10 @@ def _pair_keys(root: Node, key_nodes: set[int]) -> None:
             if id(k) in key_nodes and i + 1 < len(kids) and kids[i + 1].kind in (VALUE, GROUP):
                 v = kids[i + 1]
                 name = k.value
-                if len(name) >= 2 and name[0] == name[-1] == '"':
+                if len(name) > 2 and name[0] == name[-1] == '"':
                     name = name[1:-1]
-                v.label, v.key = name or k.label, True
+                # An empty key stays visible as "" (falling back to the rule name would look like a real key).
+                v.label, v.key = name or '""', True
                 v.length, v.offset = v.end - k.offset, k.offset
                 out.append(v)
                 i += 2

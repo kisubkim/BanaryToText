@@ -129,8 +129,9 @@ _ONE_STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
 
 
 def _unquote(v: str) -> str:
-    """key = "text" -> key = text. Only a single quoted string; escapes stay visible."""
-    return v[1:-1] if _ONE_STRING.fullmatch(v) else v
+    """key = "text" -> key = text. Only a single quoted string; escapes stay visible.
+    An empty string keeps its quotes so it is still visible: key = ""."""
+    return v[1:-1] if v != '""' and _ONE_STRING.fullmatch(v) else v
 
 
 def _opener(close: str) -> str:

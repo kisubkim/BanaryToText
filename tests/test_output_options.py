@@ -143,3 +143,17 @@ def test_cli_layout_and_commas(tmp_path):
     assert out.read_text(encoding="utf-8").splitlines()[0] == '센서 {이름: "A", 채널: 1, 기록 [21, 22]}'
     assert main(["decode", str(f), "--rules", str(rs_path), "--no-offsets", "--commas", "-o", str(out)]) == 0
     assert '  이름: "A",' in out.read_text(encoding="utf-8").splitlines()
+
+
+def test_empty_strings_stay_visible():
+    # 09 00 = empty string: read without shifting the following bytes.
+    plain = kv_rules()
+    plain.rules[0].key = False
+    assert render(b"\x09\x00\x04\x01", plain).splitlines() == ['문자열: ""', "정수: 1"]
+    assert render(b"\x0a\x09\x00\x09a\x00\x0a", plain, labels=False, layout="inline").splitlines() == ['["", "a"]']
+    # Empty value of a key keeps its quotes, and the next key still pairs normally.
+    data = b"\x09mode\x00\x09\x00\x09ip\x00\x09x\x00"
+    assert render(data, kv_rules()).splitlines() == ['mode = ""', "ip = x"]
+    assert render(data, kv_rules(), layout="inline", commas=True).splitlines() == ['mode = ""', "ip = x"]
+    # Empty key: shown as "" rather than the rule name.
+    assert render(b"\x09\x00\x04\x1e", kv_rules()).splitlines() == ['"" = 30']
