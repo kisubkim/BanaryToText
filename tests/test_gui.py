@@ -86,6 +86,24 @@ def test_rule_dialog_preview(win, tmp_path):
     assert "0x1234" in dlg.preview.toPlainText()
 
 
+def test_rule_buttons_click(win, monkeypatch):
+    """Real button clicks: `clicked(checked)` must not leak into add_rule(tag) / save_rules(save_as)."""
+    from PySide6.QtWidgets import QPushButton
+
+    from binarytotext.gui.rule_dialog import RuleDialog
+    seen = []
+
+    def fake_exec(dlg):
+        seen.append(dlg.rule.tag)
+        dlg.tag.setText("77")
+        return 1
+    monkeypatch.setattr(RuleDialog, "exec", fake_exec)
+    buttons = {b.text(): b for b in win.tabs.widget(0).findChildren(QPushButton)}
+    n = len(win.ruleset.rules)
+    buttons["추가"].click()
+    assert seen == [""] and len(win.ruleset.rules) == n + 1 and win.ruleset.rules[-1].tag == "77"
+
+
 def test_rule_dialog_end_tag(win):
     from binarytotext.gui.rule_dialog import RuleDialog
     from binarytotext.rules import Rule

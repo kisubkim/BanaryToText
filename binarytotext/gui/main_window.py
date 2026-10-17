@@ -144,7 +144,7 @@ class MainWindow(QMainWindow):
 
         def act(text, slot, key=None, tip=""):
             a = QAction(text, self)
-            a.triggered.connect(slot)
+            a.triggered.connect(lambda *_: slot())  # don't pass `checked` into optional parameters
             if key:
                 a.setShortcut(QKeySequence(key))
             a.setToolTip(tip or text)
@@ -317,7 +317,7 @@ class MainWindow(QMainWindow):
         for text, fn in (("추가", self.add_rule), ("편집", self.edit_rule), ("복제", self.dup_rule),
                          ("삭제", self.del_rule), ("▲", lambda: self.move_rule(-1)), ("▼", lambda: self.move_rule(1))):
             b = QPushButton(text)
-            b.clicked.connect(fn)
+            b.clicked.connect(lambda *_, f=fn: f())  # add_rule(tag) must not receive `checked`
             row1.addWidget(b)
         lay.addLayout(row1)
         row2 = QHBoxLayout()
@@ -325,7 +325,7 @@ class MainWindow(QMainWindow):
                          ("다른 이름으로…", lambda: self.save_rules(True)), ("예시 규칙", self.example_rules),
                          ("새 규칙 세트", self.new_rules)):
             b = QPushButton(text)
-            b.clicked.connect(fn)
+            b.clicked.connect(lambda *_, f=fn: f())  # save_rules(save_as) must not receive `checked`
             row2.addWidget(b)
         lay.addLayout(row2)
         hint = QLabel("팁: 왼쪽 hex 에서 바이트를 선택하고 우클릭 → 태그로 규칙 추가. "
