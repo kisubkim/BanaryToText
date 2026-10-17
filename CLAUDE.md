@@ -18,11 +18,12 @@ Run from this folder with the project venv.
 
 - `model.py`: `Node` tree (offset, length, kind, label, value, children) shared by everything. Kinds: group/value/unknown/error/info.
 - `rules.py`: `RuleSet`/`Rule`/`FieldSpec` (JSON via dataclasses) and `RuleEngine`. The engine scans left to right, applies the longest matching tag, groups unmatched bytes into unknown runs. Group handling is a frame stack; `_apply` returns an event and the main loop does all stack bookkeeping (count_block items are counted in `item_done`).
+  `RuleSet.header`/`footer` are position-based field lists read before/after the tag scan; the footer must be fixed-size (`fixed_size`). `Rule.end_tag` (open rules) closes only its own group, checked before normal matching.
 - `formats/`: built-in decoders. Each module calls `register(Decoder(...))`; `Option` lists drive the GUI form; `variants` and `single_root` feed the auto-detector. Decoders read with `reader.Reader` (bounds-checked, raises `DecodeError`) and use `base.run_stream` so a failure leaves the partial tree plus an error node and a trailing unknown node.
 - `heuristics.py`: strings (ASCII/UTF-8/UTF-16/CP949), tag/rule suggestions, entropy, magic, record periods, format ranking (`FormatScore.score` penalises errors, 1-byte noise and many roots).
 - `preprocess.py`: stdlib-only transforms (decompress, base64, hex text, XOR, skip).
 - `render.py`: Node tree → text (optional `line_nodes` maps each line back to a node for GUI linking) or JSON.
-- `gui/`: `main_window.py` (decoding runs in `QThread`s with a generation counter; stale results are dropped), `hexview.py` (table-model hex view + inspector), `rule_dialog.py` (rule editor with live preview).
+- `gui/`: `main_window.py` (decoding runs in `QThread`s with a generation counter; stale results are dropped), `hexview.py` (table-model hex view + inspector), `field_editor.py` (shared FieldSpec list editor), `rule_dialog.py` (rule editor with live preview), `header_dialog.py` (header/footer).
 
 ## Conventions
 

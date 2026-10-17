@@ -187,6 +187,41 @@ def test_ruleset_without_end_tag_still_loads():
     assert rs.rules[0].end_tag == ""
 
 
+def _with_header_footer():
+    rs = example_ruleset()
+    rs.header = [FieldSpec("bytes", "매직", size=2), FieldSpec("uint", "버전", size=2),
+                 FieldSpec("skip", size=1), FieldSpec("cstring", "제목")]
+    rs.footer = [FieldSpec("uint", "CRC", size=4, endian="big", fmt="hex")]
+    return rs
+
+
+def test_header_and_footer_bound_the_body():
+    data = b"\xfe\xca\x02\x00\xff" + b"T\x00" + b"\x09hi\x00\x04\x07" + b"\x09\x00\x00\x00"
+    out = text_of(data, _with_header_footer())
+    # The body's last 09 must not read into the footer, which holds 09 00 00 00.
+    assert out == ('헤더 {\n  매직: FE CA\n  버전: 2\n  제목: "T"\n}\n'
+                   '문자열: "hi"\n정수: 7\n꼬리 {\n  CRC: 0x09000000\n}\n')
+
+
+def test_header_footer_errors():
+    rs = _with_header_footer()
+    out = text_of(b"\xfe\xca\x02", rs)  # header cut short, footer cannot fit
+    assert "헤더 필드 2 읽기 실패" in out and "헤더+꼬리" in out
+    rs.footer = [FieldSpec("cstring")]
+    root = decode_with_rules(b"\xfe\xca\x02\x00\xffT\x00", rs)
+    assert any(n.kind == ERROR and "고정 크기" in n.label for n in root.walk())
+
+
+def test_header_only_and_json_roundtrip(tmp_path):
+    rs = _with_header_footer()
+    p = tmp_path / "h.json"
+    rs.save(p)
+    assert RuleSet.load(p) == rs
+    rs.footer = []
+    data = b"\xfe\xca\x01\x00\x00\x00\x04\x05"
+    assert text_of(data, rs).endswith("정수: 5\n")
+
+
 def test_ruleset_json_roundtrip(tmp_path):
     rs = example_ruleset()
     rs.rules[1].fields[0].map = {"1": "하나"}

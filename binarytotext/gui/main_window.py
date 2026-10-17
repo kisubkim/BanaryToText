@@ -22,6 +22,7 @@ from ..model import ERROR, GROUP, INFO, UNKNOWN, Node, compute_stats, deepest_at
 from ..render import RenderOptions, render_json, render_text
 from ..rules import ACTIONS, ENCODINGS, UNKNOWN_MODES, FieldSpec, Rule, RuleEngine, RuleSet, example_ruleset
 from .hexview import HexView, Inspector, mono_font
+from .header_dialog import HeaderDialog
 from .rule_dialog import RuleDialog
 
 RULES_MODE = "__rules__"
@@ -254,6 +255,16 @@ class MainWindow(QMainWindow):
         self.rs_endian.currentIndexChanged.connect(self._rs_settings_changed)
         self.rs_enc.currentTextChanged.connect(self._rs_settings_changed)
         self.rs_unknown.currentIndexChanged.connect(self._rs_settings_changed)
+
+        hrow = QHBoxLayout()
+        self.hf_label = QLabel()
+        self.hf_label.setWordWrap(True)
+        hrow.addWidget(self.hf_label, 1)
+        hb = QPushButton("헤더 / 꼬리…")
+        hb.setToolTip("태그와 상관없이 파일 맨 앞·맨 끝의 위치로 정해지는 구조")
+        hb.clicked.connect(self.edit_header)
+        hrow.addWidget(hb)
+        lay.addLayout(hrow)
 
         self.rule_table = QTableWidget(0, 5)
         self.rule_table.setHorizontalHeaderLabels(["사용", "태그", "이름", "동작", "필드 / 메모"])
@@ -671,6 +682,10 @@ class MainWindow(QMainWindow):
         self.rs_enc.setEditText(rs.encoding)
         self.rs_enc.blockSignals(False)
 
+        def fsum(fs):
+            return ", ".join(f.summary() for f in fs) if fs else "없음"
+        self.hf_label.setText(f"헤더: {fsum(rs.header)}   /   꼬리: {fsum(rs.footer)}")
+
         t = self.rule_table
         row = t.currentRow()
         t.blockSignals(True)
@@ -730,6 +745,12 @@ class MainWindow(QMainWindow):
             if r:
                 self.ruleset.rules[i] = r
                 self._rules_changed()
+
+    def edit_header(self) -> None:
+        dlg = HeaderDialog(self, self.ruleset, self.data)
+        if dlg.exec():
+            self.ruleset.header, self.ruleset.footer = dlg.header, dlg.footer
+            self._rules_changed()
 
     def dup_rule(self) -> None:
         i = self.rule_table.currentRow()

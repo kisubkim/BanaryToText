@@ -116,6 +116,11 @@ class RuleSet:
     encoding: str = "ascii"
     unknown: str = "hex"
     rules: list[Rule] = field(default_factory=list)
+    # Position-based structure: fields read from the start of the file before
+    # tag scanning, and fixed-size fields at the very end. Tag rules only see
+    # the bytes in between.
+    header: list[FieldSpec] = field(default_factory=list)
+    footer: list[FieldSpec] = field(default_factory=list)
 
     # ---- (de)serialization ----
     def to_json(self) -> str:
@@ -123,14 +128,13 @@ class RuleSet:
 
     @classmethod
     def from_dict(cls, d: dict) -> "RuleSet":
-        rs = cls(**_known(cls, d, exclude={"rules"}))
+        rs = cls(**_known(cls, d, exclude={"rules", "header", "footer"}))
         for rd in d.get("rules", []):
             r = Rule(**_known(Rule, rd, exclude={"fields"}))
-            r.fields = [FieldSpec(**_known(FieldSpec, fd)) for fd in rd.get("fields", [])]
-            for f in r.fields:
-                f.len_size = str(f.len_size)
-                f.map = {str(k): str(v) for k, v in (f.map or {}).items()}
+            r.fields = _fields(rd.get("fields", []))
             rs.rules.append(r)
+        rs.header = _fields(d.get("header", []))
+        rs.footer = _fields(d.get("footer", []))
         return rs
 
     @classmethod
@@ -139,6 +143,25 @@ class RuleSet:
 
     def save(self, path: str | Path) -> None:
         Path(path).write_text(self.to_json(), encoding="utf-8")
+
+
+def _fields(items: list[dict]) -> list[FieldSpec]:
+    out = [FieldSpec(**_known(FieldSpec, fd)) for fd in items]
+    for f in out:
+        f.len_size = str(f.len_size)
+        f.map = {str(k): str(v) for k, v in (f.map or {}).items()}
+    return out
+
+
+# Field types whose byte size is known up front (allowed in the footer).
+FIXED_SIZE_TYPES = {"uint", "int", "float", "bool", "fstring", "bytes", "bcd", "skip", "unixtime"}
+
+
+def fixed_size(fields_: list[FieldSpec]) -> int | None:
+    """Total byte size of the fields, or None if any field is variable-length."""
+    if any(f.type not in FIXED_SIZE_TYPES for f in fields_):
+        return None
+    return sum(f.size for f in fields_)
 
 
 def _known(cls, d: dict, exclude: set[str] = frozenset()) -> dict:
@@ -365,11 +388,24 @@ class RuleEngine:
         root = Node(0, len(data), GROUP, self.rs.name or "사용자 규칙")
         for e in self.errors:
             root.add(Node(0, 0, ERROR, e))
-        if not self.by_first and not self.wild_first:
+        if not self.by_first and not self.wild_first and not self.rs.header and not self.rs.footer:
             root.add(Node(0, 0, INFO, "활성화된 규칙이 없습니다. 규칙을 추가하면 바로 해석됩니다."))
         stack = [_Frame(root, None)]
         pos, unk_start, nodes = 0, None, 0
+        # Tag rules run over data[pos:n]: after the header, before the footer.
+        if self.rs.header:
+            pos = self._fixed_part(root, data, 0, len(data), self.rs.header, "헤더")
         n = len(data)
+        footer_at = None
+        if self.rs.footer:
+            size = fixed_size(self.rs.footer)
+            if size is None:
+                root.add(Node(0, 0, ERROR, "꼬리에는 고정 크기 필드만 쓸 수 있습니다",
+                              "정수/실수/불리언/고정 문자열/바이트/BCD/Unix 시각/건너뛰기"))
+            elif len(data) - size < pos:
+                root.add(Node(0, 0, ERROR, f"파일이 헤더+꼬리({size} byte)보다 짧습니다"))
+            else:
+                footer_at = n = len(data) - size
 
         def flush(upto: int) -> None:
             nonlocal unk_start
@@ -442,7 +478,26 @@ class RuleEngine:
             root.add(self._unknown(data, pos, n, f"{n - pos} byte (해석 중단 이후)"))
         while len(stack) > 1:
             pop_frame(min(pos, n), "닫히지 않음")
+        if footer_at is not None:
+            self._fixed_part(root, data, footer_at, len(data), self.rs.footer, "꼬리")
         return root
+
+    def _fixed_part(self, root: Node, data: bytes, start: int, end: int,
+                    specs: list[FieldSpec], label: str) -> int:
+        """Read header/footer fields in order; returns the position after them."""
+        g = root.add(Node(start, 0, GROUP, label, close="}"))
+        r = Reader(data, start, end)
+        for i, f in enumerate(specs):
+            fpos = r.pos
+            try:
+                text, _ = read_field(r, f, self.ctx)
+            except DecodeError as e:
+                g.add(Node(fpos, 0, ERROR, f"{label} 필드 {i + 1} 읽기 실패", str(e)))
+                break
+            if text is not None:
+                g.add(Node(fpos, r.pos - fpos, VALUE, f.name or f"필드 {i + 1}", text))
+        g.length = r.pos - start
+        return r.pos
 
     def _unknown(self, data: bytes, start: int, end: int, label: str) -> Node:
         """A run of bytes no rule explained, shown per the rule set's unknown mode."""

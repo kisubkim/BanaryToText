@@ -81,7 +81,8 @@ def test_rule_dialog_preview(win, tmp_path):
     dlg.tag.setText("ZZ")
     assert not dlg.ok_button.isEnabled()
     dlg.tag.setText("10")
-    dlg.f_fmt.setCurrentIndex(dlg.f_fmt.findData("hex"))
+    ed = dlg.fields_editor
+    ed.f_fmt.setCurrentIndex(ed.f_fmt.findData("hex"))
     assert "0x1234" in dlg.preview.toPlainText()
 
 
@@ -97,3 +98,26 @@ def test_rule_dialog_end_tag(win):
     assert dlg.ok_button.isEnabled() and dlg.rule.end_tag == "00"
     dlg.action.setCurrentIndex(dlg.action.findData("value"))
     assert not dlg.end_tag.isEnabled()
+
+
+def test_header_dialog(win):
+    from binarytotext.gui.header_dialog import HeaderDialog
+    from binarytotext.rules import FieldSpec
+    data = bytes.fromhex("FECA 0100 0904 0A DEADBEEF")
+    dlg = HeaderDialog(win, win.ruleset, data)
+    dlg.head_editor._add()
+    ed = dlg.head_editor
+    ed.f_type.setCurrentIndex(ed.f_type.findData("uint"))
+    ed.f_size.setValue(2)
+    ed.f_name.setText("매직")
+    ed.f_fmt.setCurrentIndex(ed.f_fmt.findData("hex"))
+    assert "매직: 0xCAFE" in dlg.preview.toPlainText()
+    dlg.footer.append(FieldSpec("cstring"))
+    dlg._changed()
+    assert "고정 크기" in dlg.msg.text()
+    dlg.footer[:] = [FieldSpec("uint", "CRC", size=4, endian="big", fmt="hex")]
+    dlg._changed()
+    assert "CRC: 0xDEADBEEF" in dlg.preview.toPlainText()
+    win.ruleset.header, win.ruleset.footer = dlg.header, dlg.footer
+    win._rules_changed()
+    assert "매직" in win.hf_label.text() and "CRC" in win.hf_label.text()
