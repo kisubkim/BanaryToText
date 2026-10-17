@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import heuristics, preprocess
+from . import heuristics, library, preprocess
 from .formats import REGISTRY
 from .render import RenderOptions, render_json, render_text
 from .rules import RuleSet, decode_with_rules
@@ -38,6 +38,7 @@ def main(argv: list[str] | None = None, gui: bool = True) -> int:
     g = d.add_mutually_exclusive_group(required=True)
     g.add_argument("--rules", help="규칙 세트 JSON")
     g.add_argument("--format", help="내장 포맷 키 (formats 명령으로 확인)")
+    g.add_argument("--library", metavar="DIR", help="규칙 폴더: 식별 조건이 맞는 규칙 세트를 자동 선택")
     d.add_argument("--opt", action="append", default=[], metavar="KEY=VALUE", help="포맷 옵션")
     d.add_argument("--pre", default="none", choices=list(preprocess.TRANSFORMS), help="전처리")
     d.add_argument("--pre-arg", default="", help="전처리 인자 (skip 의 N, xor 키 hex)")
@@ -84,6 +85,15 @@ def main(argv: list[str] | None = None, gui: bool = True) -> int:
         k, _, v = kv.partition("=")
         opts[k] = _opt_value(v)
     rules = RuleSet.load(args.rules) if args.rules else None
+    if args.library:
+        entries, errors = library.scan(args.library)
+        for e in errors:
+            sys.stderr.write(f"경고: {e}\n")
+        hits = library.find(data, entries)
+        if not hits:
+            raise SystemExit(f"규칙 폴더 {args.library} 에 이 파일과 맞는 규칙 세트가 없습니다")
+        rules = hits[0].ruleset
+        sys.stderr.write(f"규칙 자동 선택: {hits[0].path.name}\n")
     root = decode_bytes(data, rules, args.format, opts)
     text = render_json(root) if args.json else render_text(
         root, data, RenderOptions(offsets=not args.no_offsets, raw_hex=args.raw))

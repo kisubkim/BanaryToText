@@ -16,11 +16,12 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDia
                                QTableWidgetItem, QTabWidget, QTextEdit, QToolBar, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
-from .. import __version__, heuristics, preprocess
+from .. import __version__, heuristics, library, preprocess
 from ..formats import REGISTRY
 from ..model import ERROR, GROUP, INFO, UNKNOWN, Node, compute_stats, deepest_at
 from ..render import RenderOptions, render_json, render_text
-from ..rules import ACTIONS, ENCODINGS, UNKNOWN_MODES, FieldSpec, Rule, RuleEngine, RuleSet, example_ruleset
+from ..rules import (ACTIONS, ENCODINGS, UNKNOWN_MODES, FieldSpec, Rule, RuleEngine, RuleSet, example_ruleset,
+                     parse_tag)
 from .hexview import HexView, Inspector, mono_font
 from .header_dialog import HeaderDialog
 from .rule_dialog import RuleDialog
@@ -106,6 +107,7 @@ class MainWindow(QMainWindow):
         self.path: Path | None = None
         self.rules_path: Path | None = None
         self.ruleset = self._restore_ruleset()
+        self._saved_json = self._saved_snapshot()  # JSON at last load/save, for the unsaved check
         self.format_opts: dict[str, dict] = {}
         self.gen = 0
         self.jobs: list[QThread] = []
@@ -250,7 +252,35 @@ class MainWindow(QMainWindow):
         form.addRow("기본 엔디언", self.rs_endian)
         form.addRow("기본 문자 인코딩", self.rs_enc)
         form.addRow("규칙에 없는 byte", self.rs_unknown)
+        idrow = QHBoxLayout()
+        self.rs_match_off = QSpinBox()
+        self.rs_match_off.setRange(0, 1 << 30)
+        self.rs_match_off.setPrefix("위치 ")
+        self.rs_match = QLineEdit()
+        self.rs_match.setFont(mono_font())
+        self.rs_match.setPlaceholderText("예: FE CA   (비우면 자동 선택 안 함)")
+        take = QPushButton("현재 파일 값")
+        take.setToolTip("현재 파일의 그 위치 4 byte를 식별값으로 넣습니다")
+        take.clicked.connect(self._take_match_from_file)
+        idrow.addWidget(self.rs_match_off)
+        idrow.addWidget(self.rs_match, 1)
+        idrow.addWidget(take)
+        form.addRow("식별 조건", idrow)
+        librow = QHBoxLayout()
+        self.lib_label = QLabel()
+        self.lib_auto = QCheckBox("열 때 자동 선택")
+        self.lib_auto.setChecked(self.settings.value("library_auto", True, type=bool))
+        self.lib_auto.toggled.connect(lambda v: self.settings.setValue("library_auto", v))
+        lb = QPushButton("폴더…")
+        lb.clicked.connect(self.choose_library)
+        librow.addWidget(self.lib_label, 1)
+        librow.addWidget(self.lib_auto)
+        librow.addWidget(lb)
+        form.addRow("규칙 폴더", librow)
         lay.addLayout(form)
+        self._update_library_label()
+        self.rs_match_off.valueChanged.connect(self._rs_settings_changed)
+        self.rs_match.editingFinished.connect(self._rs_settings_changed)
         self.rs_name.editingFinished.connect(self._rs_settings_changed)
         self.rs_endian.currentIndexChanged.connect(self._rs_settings_changed)
         self.rs_enc.currentTextChanged.connect(self._rs_settings_changed)
@@ -379,7 +409,10 @@ class MainWindow(QMainWindow):
         self.pre.blockSignals(False)
         self.report = None
         self.an_status.setText("F6 또는 '분석 실행'으로 이 파일을 분석할 수 있습니다.")
+        msg = self._auto_select_rules(raw)
         self._set_data(raw)
+        if msg:
+            self.statusBar().showMessage(msg)
         self.setWindowTitle(f"{self.path.name} — BinaryToText {__version__}")
 
     def _set_data(self, data: bytes) -> None:
@@ -681,6 +714,10 @@ class MainWindow(QMainWindow):
         self.rs_enc.blockSignals(True)
         self.rs_enc.setEditText(rs.encoding)
         self.rs_enc.blockSignals(False)
+        self.rs_match_off.blockSignals(True)
+        self.rs_match_off.setValue(rs.match_offset)
+        self.rs_match_off.blockSignals(False)
+        self.rs_match.setText(rs.match_pattern)
 
         def fsum(fs):
             return ", ".join(f.summary() for f in fs) if fs else "없음"
@@ -714,6 +751,13 @@ class MainWindow(QMainWindow):
         rs.endian = self.rs_endian.currentData()
         rs.encoding = self.rs_enc.currentText().strip() or "ascii"
         rs.unknown = self.rs_unknown.currentData()
+        rs.match_offset = self.rs_match_off.value()
+        rs.match_pattern = self.rs_match.text().strip()
+        if rs.match_pattern:
+            try:
+                parse_tag(rs.match_pattern)
+            except ValueError as e:
+                self.statusBar().showMessage(f"식별 조건 오류: {e}")
         self.settings.setValue("ruleset_json", rs.to_json())
         if self.mode.currentData() == RULES_MODE:
             self.schedule()
@@ -782,12 +826,14 @@ class MainWindow(QMainWindow):
             self._load_rules_path(p)
 
     def _load_rules_path(self, p: str) -> None:
+        if not self._confirm_replace():
+            return
         try:
             self.ruleset = RuleSet.load(p)
         except Exception as e:
             QMessageBox.warning(self, "불러오기 실패", str(e))
             return
-        self.rules_path = Path(p)
+        self._set_rules_source(Path(p))
         self.settings.setValue("rules_dir", str(self.rules_path.parent))
         self._rules_changed()
         self.statusBar().showMessage(f"규칙 불러옴: {p}")
@@ -795,33 +841,118 @@ class MainWindow(QMainWindow):
     def save_rules(self, save_as: bool = False) -> None:
         p = self.rules_path
         if save_as or p is None:
-            default = str(self.rules_path or Path(self.settings.value("rules_dir", "")) / f"{self.ruleset.name}.json")
+            base = self._library_dir() or self.settings.value("rules_dir", "")
+            default = str(self.rules_path or Path(base) / f"{self.ruleset.name}.json")
             s, _ = QFileDialog.getSaveFileName(self, "규칙 저장", default, "규칙 JSON (*.json)")
             if not s:
                 return
             p = Path(s)
         self.ruleset.save(p)
-        self.rules_path = p
+        self._set_rules_source(p)
         self.settings.setValue("rules_dir", str(p.parent))
+        self._update_library_label()
         self.statusBar().showMessage(f"규칙 저장: {p}")
 
     def example_rules(self) -> None:
         if self._confirm_replace():
             self.ruleset = example_ruleset()
-            self.rules_path = None
+            self._set_rules_source(None)
             self._rules_changed()
 
     def new_rules(self) -> None:
         if self._confirm_replace():
             self.ruleset = RuleSet()
-            self.rules_path = None
+            self._set_rules_source(None)
             self._rules_changed()
 
+    def _dirty(self) -> bool:
+        return self.ruleset.to_json() != self._saved_json
+
     def _confirm_replace(self) -> bool:
-        if not self.ruleset.rules:
+        """Before replacing the current rule set: offer to save unsaved changes."""
+        if not self._dirty():
             return True
-        return QMessageBox.question(self, "규칙 바꾸기", "현재 규칙을 바꿉니다. 저장하지 않은 규칙은 사라집니다. 계속할까요?") \
-            == QMessageBox.Yes
+        ans = QMessageBox.question(
+            self, "저장하지 않은 규칙",
+            f"현재 규칙 세트 '{self.ruleset.name}' 에 저장하지 않은 변경이 있습니다.\n"
+            "저장할까요? (취소하면 현재 규칙을 그대로 둡니다)",
+            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Save)
+        if ans == QMessageBox.Save:
+            self.save_rules()
+            return not self._dirty()
+        return ans == QMessageBox.Discard
+
+    def _set_rules_source(self, path: Path | None) -> None:
+        self.rules_path = path
+        self._saved_json = self.ruleset.to_json()
+        self.settings.setValue("rules_path", str(path) if path else "")
+
+    def _saved_snapshot(self) -> str:
+        p = self.settings.value("rules_path", "")
+        if p and Path(p).is_file():
+            try:
+                saved = RuleSet.load(p).to_json()
+                self.rules_path = Path(p)
+                return saved
+            except Exception:
+                pass
+        return example_ruleset().to_json()
+
+    # ------------------------------------------------------------ rule library
+    def _library_dir(self) -> str:
+        return self.settings.value("library_dir", "") or ""
+
+    def _update_library_label(self) -> None:
+        d = self._library_dir()
+        if not d:
+            self.lib_label.setText("지정 안 됨 (규칙 JSON 을 모아 둔 폴더)")
+            return
+        entries, _ = library.scan(d)
+        with_id = sum(1 for e in entries if e.ruleset.match_pattern.strip())
+        self.lib_label.setText(f"{Path(d).name}  (규칙 {len(entries)}개, 식별 조건 {with_id}개)")
+        self.lib_label.setToolTip(d)
+
+    def choose_library(self) -> None:
+        d = QFileDialog.getExistingDirectory(self, "규칙 폴더 선택", self._library_dir())
+        if d:
+            self.set_library(d)
+
+    def set_library(self, d: str) -> None:
+        self.settings.setValue("library_dir", d)
+        self._update_library_label()
+
+    def _take_match_from_file(self) -> None:
+        off = self.rs_match_off.value()
+        b = self.data[off:off + 4]
+        if not b:
+            QMessageBox.information(self, "식별 조건", "현재 파일에 그 위치의 데이터가 없습니다.")
+            return
+        self.rs_match.setText(b.hex(" ").upper())
+        self._rs_settings_changed()
+
+    def _auto_select_rules(self, data: bytes) -> str:
+        """Pick the library rule set whose identification matches. Returns a status message."""
+        d = self._library_dir()
+        if not d or not self.lib_auto.isChecked():
+            return ""
+        entries, errors = library.scan(d)
+        hits = library.find(data, entries)
+        warn = f"  (읽지 못한 규칙 파일 {len(errors)}개)" if errors else ""
+        if not hits:
+            return f"규칙 폴더에 이 파일과 맞는 규칙 세트가 없어 현재 규칙을 그대로 씁니다{warn}"
+        best = hits[0]
+        rs = best.ruleset
+        others = f", 다른 후보 {len(hits) - 1}개" if len(hits) > 1 else ""
+        why = f"위치 0x{rs.match_offset:X} = {rs.match_pattern}"
+        if self.rules_path and self.rules_path.resolve() == best.path.resolve() and not self._dirty():
+            return f"규칙 세트 '{rs.name}' 유지 ({why}{others}){warn}"
+        if not self._confirm_replace():
+            return f"자동 선택 취소: 현재 규칙 유지 (맞는 규칙: {best.path.name})"
+        self.ruleset = rs
+        self._set_rules_source(best.path)
+        self._rules_changed()
+        self.mode.setCurrentIndex(0)
+        return f"규칙 자동 선택: {best.path.name} — '{rs.name}' ({why}{others}){warn}"
 
     # ------------------------------------------------------------ analysis
     def run_analysis(self) -> None:

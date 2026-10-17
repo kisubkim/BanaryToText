@@ -100,6 +100,44 @@ def test_rule_dialog_end_tag(win):
     assert not dlg.end_tag.isEnabled()
 
 
+def test_library_auto_select(win, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    from binarytotext.rules import FieldSpec, Rule, RuleSet
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    RuleSet(name="카페 포맷", match_pattern="CA FE",
+            rules=[Rule("09", "카페문자열", fields=[FieldSpec("cstring")])]).save(lib / "cafe.json")
+    win.set_library(str(lib))
+    assert "규칙 1개" in win.lib_label.text()
+    f = tmp_path / "c.bin"
+    f.write_bytes(b"\xca\xfe\x09yo\x00")
+
+    # Unsaved edits + user cancels -> current rules kept.
+    win.ruleset.rules.append(Rule("77", "수정됨"))
+    win._rules_changed()
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Cancel)
+    win.open_file(str(f))
+    assert win.ruleset.name != "카페 포맷" and "자동 선택 취소" in win.statusBar().currentMessage()
+
+    # User discards -> library rule set applied.
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Discard)
+    win.open_file(str(f))
+    assert win.ruleset.name == "카페 포맷" and win.rules_path == lib / "cafe.json"
+    wait_for(lambda: '카페문자열: "yo"' in win.text.toPlainText())
+    assert not win._dirty()
+
+    # Reopening with nothing changed keeps it without asking.
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: pytest.fail("물어보면 안 됨"))
+    win.open_file(str(f))
+    assert "유지" in win.statusBar().currentMessage()
+
+    # Identification from the current file.
+    win.rs_match_off.setValue(0)
+    win._take_match_from_file()
+    assert win.ruleset.match_pattern == "CA FE 09 79"
+
+
 def test_header_dialog(win):
     from binarytotext.gui.header_dialog import HeaderDialog
     from binarytotext.rules import FieldSpec

@@ -121,6 +121,21 @@ class RuleSet:
     # the bytes in between.
     header: list[FieldSpec] = field(default_factory=list)
     footer: list[FieldSpec] = field(default_factory=list)
+    # Identification for the rule library: this rule set applies to files that
+    # have `match_pattern` (tag syntax, ?? allowed) at `match_offset`.
+    match_pattern: str = ""
+    match_offset: int = 0
+
+    def matches(self, data: bytes) -> bool:
+        if not self.match_pattern.strip():
+            return False
+        try:
+            pat = parse_tag(self.match_pattern)
+        except ValueError:
+            return False
+        o = self.match_offset
+        return o >= 0 and o + len(pat) <= len(data) and all(
+            b is None or data[o + i] == b for i, b in enumerate(pat))
 
     # ---- (de)serialization ----
     def to_json(self) -> str:
