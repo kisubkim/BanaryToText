@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 
-from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFormLayout, QGroupBox, QLabel, QLineEdit,
+from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox, QLabel, QLineEdit,
                                QPlainTextEdit, QVBoxLayout)
 
 from ..render import RenderOptions, render_text
@@ -37,6 +37,11 @@ class RuleDialog(QDialog):
         self.end_tag.setPlaceholderText("예: 00   FF FF   (비우면 공통 '그룹 닫기' 규칙으로 닫음)")
         self.end_tag.setFont(mono_font())
         self.end_msg = QLabel()
+        self.key = QCheckBox("읽은 값을 다음 값의 이름(키)으로 사용  →  key = 값")
+        self.key.setToolTip("예: 09 \"volume\" 00 04 1E → volume = 30\n"
+                            "키 바로 다음 항목이 값이 됩니다. 같은 규칙이 연달아 나오면 두 번째는 값으로 읽습니다\n"
+                            "(09 \"mode\" 09 \"auto\" → mode = \"auto\"). 키와 값은 개수 블록에서 한 항목으로 셉니다.")
+        self.key.setChecked(self.rule.key)
         self.action_help = QLabel()
         self.action_help.setWordWrap(True)
 
@@ -46,6 +51,7 @@ class RuleDialog(QDialog):
         top.addRow("이름 (출력 라벨)", self.name)
         top.addRow("동작", self.action)
         top.addRow("", self.action_help)
+        top.addRow("키", self.key)
         top.addRow("그룹 괄호", self.bracket)
         top.addRow("닫는 태그 (hex)", self.end_tag)
         top.addRow("", self.end_msg)
@@ -77,6 +83,7 @@ class RuleDialog(QDialog):
             w.textChanged.connect(self._changed)
         for c in (self.action, self.bracket):
             c.currentIndexChanged.connect(self._changed)
+        self.key.toggled.connect(self._changed)
         self.fields_editor.changed.connect(self._changed)
         self._changed()
 
@@ -87,6 +94,8 @@ class RuleDialog(QDialog):
         self.rule.bracket = self.bracket.currentData()
         self.rule.comment = self.comment.text()
         self.rule.end_tag = self.end_tag.text().strip()
+        self.key.setEnabled(self.rule.action == "value")
+        self.rule.key = self.key.isChecked() and self.rule.action == "value"
         self.action_help.setText(_ACTION_HELP.get(self.rule.action, ""))
         self.bracket.setEnabled(self.rule.action in ("open", "toggle", "len_block", "count_block"))
         is_open = self.rule.action == "open"

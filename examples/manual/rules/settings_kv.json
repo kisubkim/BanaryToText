@@ -1,0 +1,115 @@
+{
+  "name": "설정 파일 (CFG)",
+  "endian": "little",
+  "encoding": "utf-8",
+  "unknown": "hex",
+  "rules": [
+    {
+      "tag": "09",
+      "name": "문자열",
+      "action": "value",
+      "fields": [
+        {
+          "type": "cstring",
+          "name": "",
+          "size": 1,
+          "endian": "",
+          "encoding": "",
+          "terminator": "00",
+          "len_size": "1",
+          "fmt": "dec",
+          "map": {}
+        }
+      ],
+      "enabled": true,
+      "comment": "키 이름. 바로 다음 항목이 그 값",
+      "bracket": "[",
+      "end_tag": "",
+      "key": true
+    },
+    {
+      "tag": "04",
+      "name": "정수",
+      "action": "value",
+      "fields": [
+        {
+          "type": "uint",
+          "name": "",
+          "size": 1,
+          "endian": "",
+          "encoding": "",
+          "terminator": "00",
+          "len_size": "1",
+          "fmt": "dec",
+          "map": {}
+        }
+      ],
+      "enabled": true,
+      "comment": "1 byte 정수",
+      "bracket": "[",
+      "end_tag": "",
+      "key": false
+    },
+    {
+      "tag": "05",
+      "name": "정수16",
+      "action": "value",
+      "fields": [
+        {
+          "type": "uint",
+          "name": "",
+          "size": 2,
+          "endian": "",
+          "encoding": "",
+          "terminator": "00",
+          "len_size": "1",
+          "fmt": "dec",
+          "map": {}
+        }
+      ],
+      "enabled": true,
+      "comment": "2 byte 정수",
+      "bracket": "[",
+      "end_tag": "",
+      "key": false
+    },
+    {
+      "tag": "0A",
+      "name": "배열",
+      "action": "toggle",
+      "fields": [],
+      "enabled": true,
+      "comment": "0A 로 열고 다시 0A 로 닫음",
+      "bracket": "[",
+      "end_tag": "",
+      "key": false
+    },
+    {
+      "tag": "0B",
+      "name": "객체",
+      "action": "open",
+      "fields": [],
+      "enabled": true,
+      "comment": "0B 로 열고 00 으로 닫음",
+      "bracket": "{",
+      "end_tag": "00",
+      "key": false
+    }
+  ],
+  "header": [
+    {
+      "type": "fstring",
+      "name": "매직",
+      "size": 3,
+      "endian": "",
+      "encoding": "",
+      "terminator": "00",
+      "len_size": "1",
+      "fmt": "dec",
+      "map": {}
+    }
+  ],
+  "footer": [],
+  "match_pattern": "'CFG'",
+  "match_offset": 0
+}

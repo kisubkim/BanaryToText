@@ -12,7 +12,8 @@
       "enabled": true,
       "comment": "0B 로 열고 00 으로 닫는 객체",
       "bracket": "{",
-      "end_tag": "00"
+      "end_tag": "00",
+      "key": false
     },
     {
       "tag": "09",
@@ -34,7 +35,8 @@
       "enabled": true,
       "comment": "00 까지 문자열",
       "bracket": "[",
-      "end_tag": ""
+      "end_tag": "",
+      "key": false
     },
     {
       "tag": "04",
@@ -56,7 +58,8 @@
       "enabled": true,
       "comment": "1 byte 정수",
       "bracket": "[",
-      "end_tag": ""
+      "end_tag": "",
+      "key": false
     },
     {
       "tag": "05",
@@ -78,7 +81,8 @@
       "enabled": true,
       "comment": "4 byte 실수",
       "bracket": "[",
-      "end_tag": ""
+      "end_tag": "",
+      "key": false
     },
     {
       "tag": "06",
@@ -100,7 +104,8 @@
       "enabled": true,
       "comment": "Unix 초",
       "bracket": "[",
-      "end_tag": ""
+      "end_tag": "",
+      "key": false
     },
     {
       "tag": "0A",
@@ -110,7 +115,8 @@
       "enabled": true,
       "comment": "0A 로 열고 다시 0A 로 닫는 배열",
       "bracket": "[",
-      "end_tag": ""
+      "end_tag": "",
+      "key": false
     }
   ],
   "header": [

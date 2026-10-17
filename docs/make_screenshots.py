@@ -73,6 +73,30 @@ def unknown_sample() -> bytes:
     return b"\x7fLOG" + out
 
 
+def settings_ruleset() -> RuleSet:
+    return RuleSet(
+        name="설정 파일 (CFG)", endian="little", encoding="utf-8",
+        match_pattern="'CFG'", match_offset=0,
+        header=[FieldSpec("fstring", "매직", size=3)],
+        rules=[
+            Rule("09", "문자열", "value", [FieldSpec("cstring")], key=True,
+                 comment="키 이름. 바로 다음 항목이 그 값"),
+            Rule("04", "정수", "value", [FieldSpec("uint", size=1)], comment="1 byte 정수"),
+            Rule("05", "정수16", "value", [FieldSpec("uint", size=2)], comment="2 byte 정수"),
+            Rule("0A", "배열", "toggle", bracket="[", comment="0A 로 열고 다시 0A 로 닫음"),
+            Rule("0B", "객체", "open", bracket="{", end_tag="00", comment="0B 로 열고 00 으로 닫음"),
+        ])
+
+
+def settings_file() -> bytes:
+    def s(t: str) -> bytes:
+        return b"\x09" + t.encode() + b"\x00"
+    return (b"CFG" + s("device") + s("BTT-01") + s("volume") + b"\x04\x1e" + s("mode") + s("auto")
+            + s("channels") + b"\x0a\x04\x01\x04\x02\x04\x03\x0a"
+            + s("network") + b"\x0b" + s("ip") + s("192.168.0.10") + s("port") + b"\x05" + struct.pack("<H", 8080)
+            + b"\x00")
+
+
 def write_samples() -> None:
     RULES.mkdir(parents=True, exist_ok=True)
     sensor_ruleset().save(RULES / "sensor_log.json")
@@ -83,6 +107,8 @@ def write_samples() -> None:
     (SAMPLES / "sensor_03.bin").write_bytes(sensor_file([("Sensor-D", 4, 19.9, t0 + 180, [7])]))
     (SAMPLES / "profile.msgpack").write_bytes(msgpack_sample())
     (SAMPLES / "unknown.bin").write_bytes(unknown_sample())
+    settings_ruleset().save(RULES / "settings_kv.json")
+    (SAMPLES / "settings.bin").write_bytes(settings_file())
 
 
 # ---------------------------------------------------------------- screenshots
@@ -148,6 +174,17 @@ def main() -> None:
     tree.expandAll()
     save(tree.parent().parent(), "05_tree.png")
     w.text.parent().parent().setCurrentIndex(0)
+
+    # 3b. Output options: values only + one-line arrays
+    w.chk_labels.setChecked(False)
+    w.chk_inline.setChecked(True)
+    wait(lambda: "[21, 22, 24]" in w.text.toPlainText())
+    save(w.text.parent().parent(), "16_values_only.png")
+    w.chk_labels.setChecked(True)
+    wait(lambda: "이름:" in w.text.toPlainText())
+    save(w.text.parent().parent(), "17_inline_arrays.png")
+    w.chk_inline.setChecked(False)
+    wait(lambda: "기록 [" in w.text.toPlainText() and "[21" not in w.text.toPlainText())
 
     # 4. Rule dialog (object with end tag) and a value rule
     rs = w.ruleset
@@ -236,9 +273,23 @@ def main() -> None:
     wait(lambda: "Sensor-A" in w.text.toPlainText())
     save(w, "13_builtin_format.png")
 
-    # 10. Batch conversion
+    # 9b. Keys read from the data: key = value
     w.mode.setCurrentIndex(0)
     w.lib_auto.setChecked(True)
+    w._set_rules_source(None)  # current edits count as saved: no prompt on auto-selection
+    w.open_file(str(SAMPLES / "settings.bin"))
+    wait(lambda: "volume = 30" in w.text.toPlainText())
+    w.chk_inline.setChecked(True)
+    wait(lambda: "[1, 2, 3]" in w.text.toPlainText())
+    save(w, "18_key_value.png")
+    dlg = RuleDialog(w, w.ruleset.rules[0], w.ruleset, w.data)
+    dlg.resize(820, 960)
+    dlg.show()
+    save(dlg, "19_rule_dialog_key.png")
+    dlg.close()
+    w.chk_inline.setChecked(False)
+
+    # 10. Batch conversion
     out = ROOT / "build" / "manual" / "결과"  # build/ is gitignored
     import shutil
     shutil.rmtree(out, ignore_errors=True)

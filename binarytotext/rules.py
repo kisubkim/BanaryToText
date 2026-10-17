@@ -101,11 +101,16 @@ class Rule:
     # "open" only: tag that closes this group. It is recognised only while this
     # group is the innermost one, so the same bytes can mean something else elsewhere.
     end_tag: str = ""
+    # "value" only: the decoded text is the name (key) of the next item,
+    # rendered as "key = value". A key followed by a key-rule item uses it as the value.
+    key: bool = False
 
     def fields_summary(self) -> str:
         s = ", ".join(f.summary() for f in self.fields)
         if self.action == "open" and self.end_tag:
             s = f"{s}  닫는 태그 {self.end_tag}".strip()
+        if self.action == "value" and self.key:
+            s = f"{s}  → 다음 값의 키".strip()
         return s
 
 
@@ -330,6 +335,7 @@ class _Frame:
     limit: int | None = None  # len_block end offset
     remaining: int | None = None  # count_block items left
     end_pat: list[int | None] | None = None  # open rule's own closing tag
+    key_pending: bool = False  # last item was a key; the next item is its value
 
     @property
     def plain(self) -> bool:
@@ -422,10 +428,13 @@ class RuleEngine:
             else:
                 footer_at = n = len(data) - size
 
+        key_nodes: set[int] = set()  # id() of nodes used as keys, paired with their value at the end
+
         def flush(upto: int) -> None:
             nonlocal unk_start
             if unk_start is not None and upto > unk_start:
                 stack[-1].node.add(self._unknown(data, unk_start, upto, f"{upto - unk_start} byte"))
+                stack[-1].key_pending = False  # unexplained bytes break a key/value pair
             unk_start = None
 
         def pop_frame(at: int, note: str = "") -> None:
@@ -475,10 +484,17 @@ class RuleEngine:
                 new, event = self._apply(rule, data, pos, taglen, end, stack)
             except DecodeError as e:
                 fr.node.add(Node(pos, 0, ERROR, f"규칙 '{rule.name or rule.tag}' 적용 실패", str(e)))
+                fr.key_pending = False
                 unk_start = pos
                 pos += 1
                 continue
             pos = new
+            if event == "item" and rule.key and rule.action == "value" and not fr.key_pending:
+                # A key and its value count as one item (count_block).
+                key_nodes.add(id(fr.node.children[-1]))
+                fr.key_pending = True
+                continue
+            fr.key_pending = False
             if event == "item":
                 item_done(pos)
             elif isinstance(event, int):  # close the plain group at stack index `event`
@@ -495,6 +511,8 @@ class RuleEngine:
             pop_frame(min(pos, n), "닫히지 않음")
         if footer_at is not None:
             self._fixed_part(root, data, footer_at, len(data), self.rs.footer, "꼬리")
+        if key_nodes:
+            _pair_keys(root, key_nodes)
         return root
 
     def _fixed_part(self, root: Node, data: bytes, start: int, end: int,
@@ -597,6 +615,27 @@ class RuleEngine:
                 stack.append(_Frame(g, rule, remaining=count))
             return r.pos, "open"
         raise DecodeError(f"알 수 없는 동작 '{a}'")
+
+
+def _pair_keys(root: Node, key_nodes: set[int]) -> None:
+    """Merge each key node into the item right after it: label = key, span = key..value."""
+    for g in [n for n in root.walk() if n.kind == GROUP]:
+        out, kids, i = [], g.children, 0
+        while i < len(kids):
+            k = kids[i]
+            if id(k) in key_nodes and i + 1 < len(kids) and kids[i + 1].kind in (VALUE, GROUP):
+                v = kids[i + 1]
+                name = k.value
+                if len(name) >= 2 and name[0] == name[-1] == '"':
+                    name = name[1:-1]
+                v.label, v.key = name or k.label, True
+                v.length, v.offset = v.end - k.offset, k.offset
+                out.append(v)
+                i += 2
+                continue
+            out.append(k)  # unpaired key (value missing): stays a normal item
+            i += 1
+        g.children = out
 
 
 def decode_with_rules(data: bytes, ruleset: RuleSet) -> Node:

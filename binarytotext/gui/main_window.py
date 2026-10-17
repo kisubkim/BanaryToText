@@ -184,7 +184,14 @@ class MainWindow(QMainWindow):
         self.chk_offsets.setChecked(self.settings.value("offsets", True, type=bool))
         self.chk_raw = QCheckBox("원본 hex")
         self.chk_raw.setChecked(self.settings.value("raw_hex", False, type=bool))
-        for c in (self.chk_offsets, self.chk_raw):
+        self.chk_labels = QCheckBox("이름")
+        self.chk_labels.setToolTip("끄면 규칙 이름(라벨) 없이 해석된 값만 출력합니다.\n"
+                                   "파일에서 읽은 키(key = 값)는 그대로 남습니다.")
+        self.chk_labels.setChecked(self.settings.value("labels", True, type=bool))
+        self.chk_inline = QCheckBox("배열 한 줄")
+        self.chk_inline.setToolTip("값만 들어 있는 [ ] 배열을 [21, 22, 24] 처럼 쉼표로 이어 한 줄로 출력합니다.")
+        self.chk_inline.setChecked(self.settings.value("inline_arrays", False, type=bool))
+        for c in (self.chk_offsets, self.chk_raw, self.chk_labels, self.chk_inline):
             c.toggled.connect(self.schedule)
             tb.addWidget(c)
         tb.addSeparator()
@@ -525,7 +532,8 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ decode
     def _render_opts(self) -> RenderOptions:
-        return RenderOptions(offsets=self.chk_offsets.isChecked(), raw_hex=self.chk_raw.isChecked())
+        return RenderOptions(offsets=self.chk_offsets.isChecked(), raw_hex=self.chk_raw.isChecked(),
+                             labels=self.chk_labels.isChecked(), inline_arrays=self.chk_inline.isChecked())
 
     def _current_opts(self) -> dict:
         mode = self.mode.currentData()
@@ -1088,6 +1096,8 @@ class MainWindow(QMainWindow):
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("offsets", self.chk_offsets.isChecked())
         self.settings.setValue("raw_hex", self.chk_raw.isChecked())
+        self.settings.setValue("labels", self.chk_labels.isChecked())
+        self.settings.setValue("inline_arrays", self.chk_inline.isChecked())
         self.settings.setValue("ruleset_json", self.ruleset.to_json())
         if self.batch_dlg is not None:
             self.batch_dlg.close()

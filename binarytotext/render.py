@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from .model import ERROR, GROUP, INFO, UNKNOWN, Node
+from .model import ERROR, GROUP, INFO, UNKNOWN, VALUE, Node
 
 
 @dataclass
@@ -14,6 +14,8 @@ class RenderOptions:
     raw_hex: bool = False
     indent: str = "  "
     max_lines: int = 0  # 0 = unlimited
+    labels: bool = True  # False: values only (keys read from the data are kept)
+    inline_arrays: bool = False  # [ ] groups of plain values on one line: "[21, 22, 24]"
 
 
 def render_text(root: Node, data: bytes, opts: RenderOptions | None = None,
@@ -38,15 +40,36 @@ def render_text(root: Node, data: bytes, opts: RenderOptions | None = None,
         more = " …" if n.length > 16 else ""
         return f"    ; {b.hex(' ').upper()}{more}"
 
+    def item(n: Node) -> str:
+        """A value inside a one-line array: labels dropped, keys kept."""
+        v = n.value if n.value != "" else n.label
+        return f"{n.label} = {v}" if n.key else v
+
+    def inline(n: Node) -> bool:
+        kids = n.children
+        if not (opts.inline_arrays and n.close == "]" and kids
+                and all(c.kind == VALUE and not c.children for c in kids)):
+            return False
+        # With labels shown, only collapse when the items share one label (a plain list).
+        return not opts.labels or all(c.key for c in kids) or len({c.label for c in kids}) == 1
+
     def emit(n: Node, depth: int) -> bool:
         if opts.max_lines and len(out) >= opts.max_lines:
             return False
         pad = opts.indent * depth
         note = f"  ({n.note})" if n.note else ""
         if n.kind == GROUP:
-            head = n.label + (f" {n.value}" if n.value else "")
-            opener = _opener(n.close)
-            put(n, f"{prefix(n)}{pad}{head} {opener}{note}".rstrip())
+            if n.key:
+                head = f"{n.label} =" + (f" {n.value}" if n.value else "")
+            elif opts.labels:
+                head = n.label + (f" {n.value}" if n.value else "")
+            else:
+                head = n.value
+            lead = f"{prefix(n)}{pad}{head + ' ' if head else ''}{_opener(n.close)}"
+            if inline(n):
+                put(n, f"{lead}{', '.join(item(c) for c in n.children)}{n.close}{note}")
+                return True
+            put(n, f"{lead}{note}".rstrip())
             for c in n.children:
                 if not emit(c, depth + 1):
                     return False
@@ -59,6 +82,10 @@ def render_text(root: Node, data: bytes, opts: RenderOptions | None = None,
             line = f"!! 오류: {n.label}" + (f" — {n.value}" if n.value else "")
         elif n.kind == INFO:
             line = f"# {n.label}" + (f": {n.value}" if n.value else "")
+        elif n.key:
+            line = f"{n.label} = {n.value}"
+        elif not opts.labels:
+            line = n.value if n.value != "" else n.label  # a value-less rule only has its name to show
         else:
             line = f"{n.label}: {n.value}" if n.value != "" and n.label else (n.label or n.value)
         put(n, f"{prefix(n)}{pad}{line}{note}{raw(n)}")
@@ -84,6 +111,8 @@ def to_dict(n: Node) -> dict:
         d["value"] = n.value
     if n.note:
         d["note"] = n.note
+    if n.key:
+        d["key"] = True
     if n.children:
         d["children"] = [to_dict(c) for c in n.children]
     return d

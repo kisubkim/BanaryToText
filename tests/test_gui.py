@@ -104,6 +104,25 @@ def test_rule_buttons_click(win, monkeypatch):
     assert seen == [""] and len(win.ruleset.rules) == n + 1 and win.ruleset.rules[-1].tag == "77"
 
 
+def test_key_rule_and_output_toggles(win, tmp_path):
+    from binarytotext.gui.rule_dialog import RuleDialog
+    from binarytotext.rules import FieldSpec, Rule
+    f = tmp_path / "kv.bin"
+    f.write_bytes(b"\x09volume\x00\x04\x1e\x0a\x04\x01\x04\x02\x0a")
+    win.open_file(str(f))
+    dlg = RuleDialog(win, win.ruleset.rules[0], win.ruleset, win.data)
+    dlg.key.setChecked(True)
+    assert dlg.rule.key and "volume = 30" in dlg.preview.toPlainText()
+    dlg.action.setCurrentIndex(dlg.action.findData("open"))
+    assert not dlg.key.isEnabled() and not dlg.rule.key
+    win.ruleset.rules[0] = Rule("09", "문자열", fields=[FieldSpec("cstring")], key=True)
+    win._rules_changed()
+    win.chk_inline.setChecked(True)
+    win.chk_labels.setChecked(False)
+    wait_for(lambda: "volume = 30" in win.text.toPlainText() and "[1, 2]" in win.text.toPlainText())
+    assert "정수" not in win.text.toPlainText()
+
+
 def test_rule_dialog_end_tag(win):
     from binarytotext.gui.rule_dialog import RuleDialog
     from binarytotext.rules import Rule

@@ -21,6 +21,11 @@ def _opt_value(s: str):
         return s
 
 
+def _render_opts(args) -> RenderOptions:
+    return RenderOptions(offsets=not args.no_offsets, raw_hex=args.raw,
+                         labels=not args.no_labels, inline_arrays=args.inline_arrays)
+
+
 def _opts(pairs: list[str]) -> dict:
     opts = {}
     for kv in pairs:
@@ -42,7 +47,7 @@ def _batch(args) -> int:
         ruleset=RuleSet.load(args.rules) if args.rules else None, fmt=args.format or "", fmt_opts=fmt_opts,
         library_dir=args.library or "", fallback=bool(args.rules or args.format),
         pre=args.pre, pre_arg=args.pre_arg, as_json=args.json,
-        render=RenderOptions(offsets=not args.no_offsets, raw_hex=args.raw),
+        render=_render_opts(args),
         out_dir=args.out_dir, pattern=args.name, overwrite=args.overwrite)
     files = batch.collect(args.inputs, args.recursive, args.include, args.out_dir)
     if not files:
@@ -86,6 +91,8 @@ def main(argv: list[str] | None = None, gui: bool = True) -> int:
     d.add_argument("--json", action="store_true", help="JSON 트리로 출력")
     d.add_argument("--no-offsets", action="store_true")
     d.add_argument("--raw", action="store_true", help="각 항목의 원본 hex 함께 표시")
+    d.add_argument("--no-labels", action="store_true", help="이름(라벨) 없이 값만 (파일에서 읽은 키는 유지)")
+    d.add_argument("--inline-arrays", action="store_true", help="값만 든 배열을 [1, 2, 3] 처럼 한 줄로")
 
     a = sub.add_parser("analyze", help="자동 분석 보고서")
     a.add_argument("file")
@@ -111,6 +118,8 @@ def main(argv: list[str] | None = None, gui: bool = True) -> int:
     b.add_argument("--json", action="store_true", help="JSON 트리로 저장")
     b.add_argument("--no-offsets", action="store_true")
     b.add_argument("--raw", action="store_true", help="각 항목의 원본 hex 함께 표시")
+    b.add_argument("--no-labels", action="store_true", help="이름(라벨) 없이 값만 (파일에서 읽은 키는 유지)")
+    b.add_argument("--inline-arrays", action="store_true", help="값만 든 배열을 [1, 2, 3] 처럼 한 줄로")
 
     sub.add_parser("formats", help="내장 포맷 목록")
 
@@ -160,7 +169,7 @@ def main(argv: list[str] | None = None, gui: bool = True) -> int:
         sys.stderr.write(f"규칙 자동 선택: {hits[0].path.name}\n")
     root = decode_bytes(data, rules, args.format, opts)
     text = render_json(root) if args.json else render_text(
-        root, data, RenderOptions(offsets=not args.no_offsets, raw_hex=args.raw))
+        root, data, _render_opts(args))
     if args.output:
         Path(args.output).write_text(text, encoding="utf-8")
     else:

@@ -25,6 +25,8 @@ class Node:
     note: str = ""
     # Closing bracket text for groups ("]" / "}" / ")" ...).
     close: str = ""
+    # The label is a key read from the data (rendered "key = value"), not a rule name.
+    key: bool = False
 
     @property
     def end(self) -> int:
