@@ -12,7 +12,18 @@
 |---|---|
 | 배포 exe | `dist\BinaryToText.exe [파일]` (GUI), `dist\btt.exe` (명령줄) |
 | 소스 | `.venv\Scripts\python -m binarytotext [파일]` |
-| 빌드 | `powershell -ExecutionPolicy Bypass -File build.ps1` (테스트 후 두 exe 생성) |
+| 빌드 | `powershell -ExecutionPolicy Bypass -File build.ps1` (테스트 후 아래 결과물 생성) |
+
+빌드 결과 (`dist\`):
+
+| 결과물 | 용도 |
+|---|---|
+| `BinaryToText.exe` | GUI 단일 exe. 내 PC에서 쓰기 편한 형태 |
+| `btt.exe` | 명령줄 단일 exe (Qt 없음, 표준 라이브러리만) |
+| `BinaryToText\` | GUI 폴더형. Qt DLL 이 따로 있어 교체 가능, 라이선스 고지·`btt.exe` 포함 |
+| `BinaryToText-<버전>-win64.zip` | 폴더형을 압축한 것. **다른 사람에게 배포할 때는 이것을 쓰세요** |
+
+옵션: `-SkipTests` (테스트 생략), `-SkipOneFile` (GUI 단일 exe 생략).
 
 ## 결과 내보내기
 
@@ -142,4 +153,6 @@ btt formats            # 내장 포맷과 옵션 목록
 명령줄 `btt.exe` 와 GUI 를 뺀 모듈은 Python 표준 라이브러리만 씁니다.
 `BinaryToText.exe` 는 Qt(LGPL-3.0)를 함께 묶으므로, 이 exe 를 다른 사람에게 배포할 때는
 Qt/PySide6 의 LGPL 고지와 라이선스 전문을 같이 제공하고, 받는 사람이 Qt 라이브러리를 교체할 수 있게 해야 합니다
-(단일 exe 대신 PyInstaller `--onedir` 빌드로 배포하면 교체가 쉽습니다).
+그래서 배포용으로는 폴더형 zip(`BinaryToText-<버전>-win64.zip`)을 씁니다. 여기에는 Qt DLL 이 따로 들어 있어
+교체할 수 있고, `licenses\` 폴더에 LGPL-3.0/GPL-3.0/Python 라이선스 전문과 교체 방법을 적은
+`THIRD_PARTY_NOTICES.txt`, 사용한 버전을 적은 `BUILD_INFO.txt` 가 함께 들어갑니다.

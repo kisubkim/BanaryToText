@@ -12,7 +12,7 @@ Run from this folder with the project venv.
 - Lint: `.venv/Scripts/python -m pyflakes binarytotext tests` (unused-import warnings in `formats/__init__.py` are intentional)
 - GUI from source: `.venv/Scripts/python -m binarytotext [file]`
 - CLI: `.venv/Scripts/python -m binarytotext decode|analyze|formats ...`
-- Release build: `powershell -ExecutionPolicy Bypass -File build.ps1` → `dist/BinaryToText.exe` (GUI) and `dist/btt.exe` (CLI, built without Qt)
+- Release build: `powershell -ExecutionPolicy Bypass -File build.ps1` → `dist/BinaryToText.exe` (GUI onefile), `dist/btt.exe` (CLI, built without Qt), `dist/BinaryToText/` (GUI onedir + `btt.exe` + `licenses/`) and `dist/BinaryToText-<ver>-win64.zip`. The zip is the one to hand out: Qt is LGPL-3.0, so its DLLs must stay replaceable and `licenses/` (LGPL/GPL texts, THIRD_PARTY_NOTICES) must ship with it. Flags: `-SkipTests`, `-SkipOneFile`
 
 ## Architecture
 

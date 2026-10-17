@@ -1,0 +1,37 @@
+BinaryToText - 외부 구성 요소 고지 (Third-party notices)
+=========================================================
+
+BinaryToText 자체는 MIT 라이선스입니다 (LICENSE 참고).
+배포 폴더/파일에는 아래 구성 요소가 함께 들어 있습니다.
+
+
+1. Qt 6 / PySide6 / Shiboken6  (BinaryToText.exe 에만 포함)
+-----------------------------------------------------------
+Copyright (C) The Qt Company Ltd. and other contributors.
+라이선스: GNU Lesser General Public License v3.0 (LGPL-3.0)
+  - 전문: LGPL-3.0.txt, 그리고 LGPL 이 참조하는 GPL-3.0.txt
+  - 이 프로그램은 Qt/PySide6 를 수정하지 않고 동적 라이브러리(DLL, .pyd)로 사용합니다.
+  - 소스 코드: https://code.qt.io  /  https://download.qt.io/official_releases/
+    PySide6: https://code.qt.io/cgit/pyside/pyside-setup.git
+    정확한 버전은 배포 폴더의 BUILD_INFO.txt 를 보세요.
+
+Qt 라이브러리 교체 방법 (LGPL-3.0 제4조):
+  폴더형 배포본(BinaryToText-<버전>-win64.zip) 의 _internal\PySide6 와 _internal\shiboken6
+  폴더 안의 Qt6*.dll, *.pyd 파일을 같은 메이저 버전(Qt 6)의 호환되는 빌드로 바꾸면,
+  BinaryToText.exe 는 다시 빌드하지 않아도 교체된 라이브러리를 사용합니다.
+  BinaryToText 의 전체 소스와 빌드 스크립트(build.ps1)는 MIT 로 공개되어 있으므로
+  수정한 PySide6 로 직접 다시 빌드할 수도 있습니다.
+
+
+2. Python  (BinaryToText.exe, btt.exe 에 포함)
+----------------------------------------------
+Copyright (c) 2001 Python Software Foundation. All rights reserved.
+라이선스: Python Software Foundation License Version 2 (PSF-2.0)
+  - 전문: Python-LICENSE.txt
+
+
+3. PyInstaller 부트로더  (BinaryToText.exe, btt.exe 에 포함)
+------------------------------------------------------------
+라이선스: GPL-2.0-or-later, 부트로더 예외(bootloader exception) 적용.
+  예외 조항에 따라 PyInstaller 로 만든 실행 파일은 제약 없이 배포할 수 있습니다.
+  https://github.com/pyinstaller/pyinstaller/blob/develop/COPYING.txt
