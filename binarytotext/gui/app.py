@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 
 
-def run(path: str | None = None) -> int:
+def run(path: str | None = None, batch_paths: list[str] | None = None) -> int:
     from PySide6.QtWidgets import QApplication
 
     from .icon import app_icon
@@ -17,4 +17,6 @@ def run(path: str | None = None) -> int:
     app.setWindowIcon(app_icon())
     win = MainWindow(path)
     win.show()
+    if batch_paths:
+        win.batch_convert(batch_paths)
     return app.exec()

@@ -138,6 +138,31 @@ def test_library_auto_select(win, tmp_path, monkeypatch):
     assert win.ruleset.match_pattern == "CA FE 09 79"
 
 
+def test_batch_dialog(win, tmp_path):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "a.bin").write_bytes(b"\x09one\x00")
+    (src / "b.bin").write_bytes(b"\x09two\x00")
+    out = tmp_path / "out"
+    win.batch_convert([str(src)])
+    dlg = win.batch_dlg
+    assert "변환 대상 2개" in dlg.count_label.text() and "사용자 규칙" in dlg.base_label.text()
+    dlg.out_dir.setText(str(out))
+    dlg.pattern.setText("{bad}.txt")
+    assert not dlg.run_btn.isEnabled()
+    dlg.pattern.setText("{stem}.txt")
+    dlg.as_json.setChecked(True)
+    assert dlg.pattern.text() == "{stem}.json"
+    dlg.as_text.setChecked(True)
+    dlg.start()
+    wait_for(lambda: dlg.job is None)
+    assert dlg.table.rowCount() == 2 and "완료 2개" in dlg.status.text()
+    assert '"two"' in (out / "b.txt").read_text(encoding="utf-8")
+    # Reopening keeps the list; settings were remembered.
+    win.batch_convert()
+    assert win.batch_dlg is dlg and win.settings.value("batch_pattern") == "{stem}.txt"
+
+
 def test_header_dialog(win):
     from binarytotext.gui.header_dialog import HeaderDialog
     from binarytotext.rules import FieldSpec

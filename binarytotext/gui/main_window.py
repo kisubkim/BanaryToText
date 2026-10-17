@@ -16,12 +16,13 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDia
                                QTableWidgetItem, QTabWidget, QTextEdit, QToolBar, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
-from .. import __version__, heuristics, library, preprocess
+from .. import __version__, batch, heuristics, library, preprocess
 from ..formats import REGISTRY
 from ..model import ERROR, GROUP, INFO, UNKNOWN, Node, compute_stats, deepest_at
 from ..render import RenderOptions, render_json, render_text
 from ..rules import (ACTIONS, ENCODINGS, UNKNOWN_MODES, FieldSpec, Rule, RuleEngine, RuleSet, example_ruleset,
                      parse_tag)
+from .batch_dialog import BatchDialog
 from .hexview import HexView, Inspector, mono_font
 from .header_dialog import HeaderDialog
 from .rule_dialog import RuleDialog
@@ -115,6 +116,7 @@ class MainWindow(QMainWindow):
         self.node_line: dict[int, int] = {}
         self._syncing = False
         self.report = None
+        self.batch_dlg: BatchDialog | None = None
 
         self.setWindowTitle(f"BinaryToText {__version__}")
         self.setAcceptDrops(True)
@@ -152,6 +154,8 @@ class MainWindow(QMainWindow):
         act("열기", self.open_dialog, "Ctrl+O", "바이너리 파일 열기 (Ctrl+O)")
         act("텍스트 저장", self.save_text, "Ctrl+S", "해석 결과를 텍스트 파일로 저장 (Ctrl+S)")
         act("JSON 저장", self.save_json, None, "해석 트리를 JSON으로 저장")
+        act("여러 파일 변환", self.batch_convert, "Ctrl+B",
+            "여러 파일·폴더를 현재 설정(또는 규칙 폴더 자동 선택)으로 한 번에 변환 (Ctrl+B)")
         tb.addSeparator()
         tb.addWidget(QLabel(" 해석 방식 "))
         self.mode = QComboBox()
@@ -442,9 +446,11 @@ class MainWindow(QMainWindow):
             e.acceptProposedAction()
 
     def dropEvent(self, e) -> None:
-        urls = e.mimeData().urls()
-        if urls:
-            p = urls[0].toLocalFile()
+        paths = [u.toLocalFile() for u in e.mimeData().urls() if u.toLocalFile()]
+        if len(paths) > 1 or (paths and Path(paths[0]).is_dir()):
+            self.batch_convert(paths)
+        elif paths:
+            p = paths[0]
             if p.lower().endswith(".json") and self._looks_like_rules(p):
                 self._load_rules_path(p)
             else:
@@ -489,6 +495,33 @@ class MainWindow(QMainWindow):
         if p:
             Path(p).write_text(render_json(r[0]), encoding="utf-8")
             self.statusBar().showMessage(f"저장: {p}")
+
+    def batch_settings(self) -> tuple[batch.Settings, str]:
+        """Snapshot of the current method/options for batch conversion, plus a description."""
+        mode = self.mode.currentData()
+        kind = self.pre.currentData()
+        st = batch.Settings(
+            ruleset=copy.deepcopy(self.ruleset) if mode == RULES_MODE else None,
+            fmt="" if mode == RULES_MODE else mode, fmt_opts=dict(self._current_opts()),
+            library_dir=self._library_dir(), pre=kind, pre_arg=self.pre_arg.text().strip(),
+            render=self._render_opts())
+        desc = f"사용자 규칙 '{self.ruleset.name}'" if mode == RULES_MODE else f"내장 포맷 {REGISTRY[mode].title}"
+        if kind != "none":
+            desc += f", 전처리 {preprocess.TRANSFORMS[kind]}"
+        return st, desc
+
+    def batch_convert(self, paths: list[str] | None = None) -> None:
+        """Open (or bring back) the batch dialog with the current settings."""
+        st, desc = self.batch_settings()
+        if self.batch_dlg is None:
+            self.batch_dlg = BatchDialog(self, st, desc, self.settings)
+        elif self.batch_dlg.job is None:
+            self.batch_dlg.set_base(st, desc)
+        if paths:
+            self.batch_dlg.add_paths(paths)
+        self.batch_dlg.show()
+        self.batch_dlg.raise_()
+        self.batch_dlg.activateWindow()
 
     # ------------------------------------------------------------ decode
     def _render_opts(self) -> RenderOptions:
@@ -1055,6 +1088,8 @@ class MainWindow(QMainWindow):
         self.settings.setValue("offsets", self.chk_offsets.isChecked())
         self.settings.setValue("raw_hex", self.chk_raw.isChecked())
         self.settings.setValue("ruleset_json", self.ruleset.to_json())
+        if self.batch_dlg is not None:
+            self.batch_dlg.close()
         for j in list(self.jobs):
             j.wait(2000)
         super().closeEvent(e)
