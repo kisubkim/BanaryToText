@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDia
 from .. import __version__, batch, heuristics, library, preprocess
 from ..formats import REGISTRY
 from ..model import ERROR, GROUP, INFO, UNKNOWN, Node, compute_stats, deepest_at
-from ..render import RenderOptions, render_json, render_text
+from ..render import LAYOUTS, RenderOptions, render_json, render_text
 from ..rules import (ACTIONS, ENCODINGS, UNKNOWN_MODES, FieldSpec, Rule, RuleEngine, RuleSet, example_ruleset,
                      parse_tag)
 from .batch_dialog import BatchDialog
@@ -188,12 +188,23 @@ class MainWindow(QMainWindow):
         self.chk_labels.setToolTip("끄면 규칙 이름(라벨) 없이 해석된 값만 출력합니다.\n"
                                    "파일에서 읽은 키(key = 값)는 그대로 남습니다.")
         self.chk_labels.setChecked(self.settings.value("labels", True, type=bool))
-        self.chk_inline = QCheckBox("배열 한 줄")
-        self.chk_inline.setToolTip("값만 들어 있는 [ ] 배열을 [21, 22, 24] 처럼 쉼표로 이어 한 줄로 출력합니다.")
-        self.chk_inline.setChecked(self.settings.value("inline_arrays", False, type=bool))
-        for c in (self.chk_offsets, self.chk_raw, self.chk_labels, self.chk_inline):
+        self.chk_commas = QCheckBox("쉼표")
+        self.chk_commas.setToolTip("그룹 안의 항목 뒤에 쉼표를 붙입니다 (마지막 항목 제외).\n"
+                                   "한 줄로 이어 쓰는 그룹은 항상 쉼표로 구분합니다.")
+        self.chk_commas.setChecked(self.settings.value("commas", False, type=bool))
+        for c in (self.chk_offsets, self.chk_raw, self.chk_labels, self.chk_commas):
             c.toggled.connect(self.schedule)
             tb.addWidget(c)
+        tb.addWidget(QLabel(" 그룹 "))
+        self.layout_combo = QComboBox()
+        for k, v in LAYOUTS.items():
+            self.layout_combo.addItem(v, k)
+        self.layout_combo.setToolTip("그룹 안 항목을 줄마다 쓸지, 한 줄로 이어 쓸지 (쉼표로 구분).\n"
+                                     "'배열만 한 줄' = 값만 든 [ ] 배열만 [21, 22, 24] 처럼.\n"
+                                     "규칙 편집 창에서 그룹 규칙마다 따로 정할 수 있습니다.")
+        self.layout_combo.setCurrentIndex(max(0, self.layout_combo.findData(self.settings.value("layout", "lines"))))
+        self.layout_combo.currentIndexChanged.connect(self.schedule)
+        tb.addWidget(self.layout_combo)
         tb.addSeparator()
         act("다시 해석", self.decode, "F5")
         act("자동 분석", self.run_analysis, "F6", "모르는 파일 분석: 포맷 추정, 태그 후보, 문자열 (F6)")
@@ -533,7 +544,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------ decode
     def _render_opts(self) -> RenderOptions:
         return RenderOptions(offsets=self.chk_offsets.isChecked(), raw_hex=self.chk_raw.isChecked(),
-                             labels=self.chk_labels.isChecked(), inline_arrays=self.chk_inline.isChecked())
+                             labels=self.chk_labels.isChecked(), layout=self.layout_combo.currentData(),
+                             commas=self.chk_commas.isChecked())
 
     def _current_opts(self) -> dict:
         mode = self.mode.currentData()
@@ -1097,7 +1109,8 @@ class MainWindow(QMainWindow):
         self.settings.setValue("offsets", self.chk_offsets.isChecked())
         self.settings.setValue("raw_hex", self.chk_raw.isChecked())
         self.settings.setValue("labels", self.chk_labels.isChecked())
-        self.settings.setValue("inline_arrays", self.chk_inline.isChecked())
+        self.settings.setValue("commas", self.chk_commas.isChecked())
+        self.settings.setValue("layout", self.layout_combo.currentData())
         self.settings.setValue("ruleset_json", self.ruleset.to_json())
         if self.batch_dlg is not None:
             self.batch_dlg.close()

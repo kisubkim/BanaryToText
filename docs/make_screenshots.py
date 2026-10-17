@@ -175,15 +175,20 @@ def main() -> None:
     save(tree.parent().parent(), "05_tree.png")
     w.text.parent().parent().setCurrentIndex(0)
 
-    # 3b. Output options: values only + one-line arrays
+    # 3b. Output options: values only + commas + one-line arrays
+    def set_layout(k: str) -> None:
+        w.layout_combo.setCurrentIndex(w.layout_combo.findData(k))
+
     w.chk_labels.setChecked(False)
-    w.chk_inline.setChecked(True)
-    wait(lambda: "[21, 22, 24]" in w.text.toPlainText())
+    w.chk_commas.setChecked(True)
+    set_layout("arrays")
+    wait(lambda: "[21, 22, 24]" in w.text.toPlainText() and '"Sensor-A",' in w.text.toPlainText())
     save(w.text.parent().parent(), "16_values_only.png")
     w.chk_labels.setChecked(True)
-    wait(lambda: "이름:" in w.text.toPlainText())
+    w.chk_commas.setChecked(False)
+    wait(lambda: "이름:" in w.text.toPlainText() and "기록 [21" in w.text.toPlainText())
     save(w.text.parent().parent(), "17_inline_arrays.png")
-    w.chk_inline.setChecked(False)
+    set_layout("lines")
     wait(lambda: "기록 [" in w.text.toPlainText() and "[21" not in w.text.toPlainText())
 
     # 4. Rule dialog (object with end tag) and a value rule
@@ -279,15 +284,27 @@ def main() -> None:
     w._set_rules_source(None)  # current edits count as saved: no prompt on auto-selection
     w.open_file(str(SAMPLES / "settings.bin"))
     wait(lambda: "volume = 30" in w.text.toPlainText())
-    w.chk_inline.setChecked(True)
-    wait(lambda: "[1, 2, 3]" in w.text.toPlainText())
+    w.chk_commas.setChecked(True)
+    set_layout("arrays")
+    wait(lambda: "[1, 2, 3]" in w.text.toPlainText() and "192.168.0.10," in w.text.toPlainText())
     save(w, "18_key_value.png")
     dlg = RuleDialog(w, w.ruleset.rules[0], w.ruleset, w.data)
     dlg.resize(820, 960)
     dlg.show()
     save(dlg, "19_rule_dialog_key.png")
     dlg.close()
-    w.chk_inline.setChecked(False)
+    set_layout("inline")
+    wait(lambda: "network = {ip = 192.168.0.10, port = 8080}" in w.text.toPlainText())
+    save(w.text.parent().parent(), "20_inline_groups.png")
+    set_layout("lines")
+    w.chk_commas.setChecked(False)
+    arr = next(r for r in w.ruleset.rules if r.tag == "0A")
+    dlg = RuleDialog(w, arr, w.ruleset, w.data)
+    dlg.layout.setCurrentIndex(dlg.layout.findData("inline"))
+    dlg.resize(820, 960)
+    dlg.show()
+    save(dlg, "21_rule_dialog_layout.png")
+    dlg.close()
 
     # 10. Batch conversion
     out = ROOT / "build" / "manual" / "결과"  # build/ is gitignored

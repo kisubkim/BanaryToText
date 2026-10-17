@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import batch, heuristics, library, preprocess
 from .formats import REGISTRY
-from .render import RenderOptions, render_json, render_text
+from .render import LAYOUTS, RenderOptions, render_json, render_text
 from .rules import RuleSet, decode_with_rules
 
 
@@ -23,7 +23,7 @@ def _opt_value(s: str):
 
 def _render_opts(args) -> RenderOptions:
     return RenderOptions(offsets=not args.no_offsets, raw_hex=args.raw,
-                         labels=not args.no_labels, inline_arrays=args.inline_arrays)
+                         labels=not args.no_labels, layout=args.layout, commas=args.commas)
 
 
 def _opts(pairs: list[str]) -> dict:
@@ -92,7 +92,9 @@ def main(argv: list[str] | None = None, gui: bool = True) -> int:
     d.add_argument("--no-offsets", action="store_true")
     d.add_argument("--raw", action="store_true", help="각 항목의 원본 hex 함께 표시")
     d.add_argument("--no-labels", action="store_true", help="이름(라벨) 없이 값만 (파일에서 읽은 키는 유지)")
-    d.add_argument("--inline-arrays", action="store_true", help="값만 든 배열을 [1, 2, 3] 처럼 한 줄로")
+    d.add_argument("--layout", choices=list(LAYOUTS), default="lines",
+                   help="그룹 표시: lines 줄마다(기본), arrays 값만 든 배열만 한 줄, inline 모든 그룹 한 줄 (규칙의 그룹 표시 설정이 우선)")
+    d.add_argument("--commas", action="store_true", help="그룹 안 항목 뒤에 쉼표 (마지막 제외)")
 
     a = sub.add_parser("analyze", help="자동 분석 보고서")
     a.add_argument("file")
@@ -119,7 +121,9 @@ def main(argv: list[str] | None = None, gui: bool = True) -> int:
     b.add_argument("--no-offsets", action="store_true")
     b.add_argument("--raw", action="store_true", help="각 항목의 원본 hex 함께 표시")
     b.add_argument("--no-labels", action="store_true", help="이름(라벨) 없이 값만 (파일에서 읽은 키는 유지)")
-    b.add_argument("--inline-arrays", action="store_true", help="값만 든 배열을 [1, 2, 3] 처럼 한 줄로")
+    b.add_argument("--layout", choices=list(LAYOUTS), default="lines",
+                   help="그룹 표시: lines 줄마다(기본), arrays 값만 든 배열만 한 줄, inline 모든 그룹 한 줄 (규칙의 그룹 표시 설정이 우선)")
+    b.add_argument("--commas", action="store_true", help="그룹 안 항목 뒤에 쉼표 (마지막 제외)")
 
     sub.add_parser("formats", help="내장 포맷 목록")
 

@@ -34,7 +34,7 @@ def test_key_string_values_lose_only_their_own_quotes():
     rs.rules.append(Rule("0D", "둘", fields=[FieldSpec("cstring"), FieldSpec("cstring")]))
     data = (b'\x09a\x00\x09say "hi"\x00' + b"\x09b\x00\x0dx\x00y\x00"
             + b"\x09c\x00\x0a\x09p\x00\x09q\x00\x0a")
-    lines = render(data, rs, inline_arrays=True).splitlines()
+    lines = render(data, rs, layout="arrays").splitlines()
     assert lines[0] == 'a = say \\"hi\\"'  # one string: outer quotes gone, escapes stay
     assert lines[1] == 'b = "x", "y"'  # two strings: left as is
     assert lines[2:] == ["c = [p = q]"]  # inside the array 09 is a key again
@@ -75,11 +75,11 @@ def test_values_only_and_inline_arrays():
         Rule("FF", "구분선"),
     ])
     data = b"\x0b\x07\x09A\x00\x0a\x04\x15\x04\x16\x0a\x0a\x04\x01\x05\x02\x0a\xff\x00"
-    assert render(data, rs, inline_arrays=True).splitlines() == [
+    assert render(data, rs, layout="arrays").splitlines() == [
         "센서 7 {", '  이름: "A"', "  기록 [21, 22]",
         "  기록 [",  # mixed labels stay one per line while labels are shown
         "    채널: 1", "    온도: 2", "  ]", "  구분선", "}"]
-    assert render(data, rs, labels=False, inline_arrays=True).splitlines() == [
+    assert render(data, rs, labels=False, layout="arrays").splitlines() == [
         "7 {", '  "A"', "  [21, 22]", "  [1, 2]", "  구분선", "}"]
     assert render(data, rs, labels=False).splitlines()[2:5] == ["  [", "    21", "    22"]
 
@@ -91,5 +91,55 @@ def test_cli_output_flags(tmp_path):
     f.write_bytes(b"\x0a\x04\x01\x04\x02\x0a\x09k\x00\x04\x03")
     out = tmp_path / "o.txt"
     assert main(["decode", str(f), "--rules", str(rs_path), "--no-offsets", "--no-labels",
-                 "--inline-arrays", "-o", str(out)]) == 0
+                 "--layout", "arrays", "-o", str(out)]) == 0
     assert out.read_text(encoding="utf-8").splitlines() == ["[1, 2]", "k = 3"]
+
+
+def sensor_like():
+    rs = RuleSet(rules=[
+        Rule("0B", "센서", "open", bracket="{", end_tag="00"),
+        Rule("09", "이름", fields=[FieldSpec("cstring")]),
+        Rule("04", "채널", fields=[FieldSpec("uint", size=1)]),
+        Rule("0A", "기록", "toggle"),
+    ])
+    data = b"\x0b\x09A\x00\x04\x01\x0a\x04\x15\x04\x16\x0a\x00\x0b\x09B\x00\x00"
+    return data, rs
+
+
+def test_commas_between_items_not_after_last():
+    data, rs = sensor_like()
+    assert render(data, rs, commas=True).splitlines() == [
+        "센서 {", '  이름: "A",', "  채널: 1,", "  기록 [", "    채널: 21,", "    채널: 22", "  ]", "}",
+        "센서 {", '  이름: "B"', "}"]  # top level has no commas: only items inside a group
+
+
+def test_inline_groups_and_rule_override():
+    data, rs = sensor_like()
+    assert render(data, rs, layout="inline").splitlines() == [
+        '센서 {이름: "A", 채널: 1, 기록 [21, 22]}', '센서 {이름: "B"}']
+    assert render(data, rs, layout="inline", labels=False).splitlines() == ['{"A", 1, [21, 22]}', '{"B"}']
+    rs.rules[3].layout = "inline"  # only the array on one line
+    assert render(data, rs, commas=True).splitlines()[:5] == [
+        "센서 {", '  이름: "A",', "  채널: 1,", "  기록 [21, 22]", "}"]
+    rs.rules[0].layout = "lines"
+    rs.rules[3].layout = ""
+    assert render(data, rs, layout="inline").splitlines()[:4] == [
+        "센서 {", '  이름: "A"', "  채널: 1", "  기록 [21, 22]"]
+
+
+def test_commas_with_keys():
+    data = b"\x0b\x09ip\x00\x09x\x00\x09port\x00\x04\x50\x00"
+    assert render(data, kv_rules(), commas=True).splitlines() == ["객체 {", "  ip = x,", "  port = 80", "}"]
+    assert render(data, kv_rules(), layout="inline").splitlines() == ["객체 {ip = x, port = 80}"]
+
+
+def test_cli_layout_and_commas(tmp_path):
+    data, rs = sensor_like()
+    rs_path, f, out = tmp_path / "r.json", tmp_path / "x.bin", tmp_path / "o.txt"
+    rs.save(rs_path)
+    f.write_bytes(data)
+    assert main(["decode", str(f), "--rules", str(rs_path), "--no-offsets", "--layout", "inline",
+                 "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8").splitlines()[0] == '센서 {이름: "A", 채널: 1, 기록 [21, 22]}'
+    assert main(["decode", str(f), "--rules", str(rs_path), "--no-offsets", "--commas", "-o", str(out)]) == 0
+    assert '  이름: "A",' in out.read_text(encoding="utf-8").splitlines()

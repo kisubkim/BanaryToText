@@ -25,7 +25,8 @@
       "comment": "키 이름. 바로 다음 항목이 그 값",
       "bracket": "[",
       "end_tag": "",
-      "key": true
+      "key": true,
+      "layout": ""
     },
     {
       "tag": "04",
@@ -48,7 +49,8 @@
       "comment": "1 byte 정수",
       "bracket": "[",
       "end_tag": "",
-      "key": false
+      "key": false,
+      "layout": ""
     },
     {
       "tag": "05",
@@ -71,7 +73,8 @@
       "comment": "2 byte 정수",
       "bracket": "[",
       "end_tag": "",
-      "key": false
+      "key": false,
+      "layout": ""
     },
     {
       "tag": "0A",
@@ -82,7 +85,8 @@
       "comment": "0A 로 열고 다시 0A 로 닫음",
       "bracket": "[",
       "end_tag": "",
-      "key": false
+      "key": false,
+      "layout": ""
     },
     {
       "tag": "0B",
@@ -93,7 +97,8 @@
       "comment": "0B 로 열고 00 으로 닫음",
       "bracket": "{",
       "end_tag": "00",
-      "key": false
+      "key": false,
+      "layout": ""
     }
   ],
   "header": [

@@ -104,6 +104,8 @@ class Rule:
     # "value" only: the decoded text is the name (key) of the next item,
     # rendered as "key = value". A key followed by a key-rule item uses it as the value.
     key: bool = False
+    # Group rules: "" follows the output option, "lines" one item per line, "inline" one line.
+    layout: str = ""
 
     def fields_summary(self) -> str:
         s = ", ".join(f.summary() for f in self.fields)
@@ -111,6 +113,8 @@ class Rule:
             s = f"{s}  닫는 태그 {self.end_tag}".strip()
         if self.action == "value" and self.key:
             s = f"{s}  → 다음 값의 키".strip()
+        if self.action != "value" and self.layout:
+            s = f"{s}  [{'한 줄로' if self.layout == 'inline' else '줄마다'}]".strip()
         return s
 
 
@@ -585,7 +589,7 @@ class RuleEngine:
             a = "open"
         if a == "open":
             text, _ = self._read_fields(r, rule.fields)
-            g = parent.add(Node(pos, r.pos - pos, GROUP, label, text, close=close))
+            g = parent.add(Node(pos, r.pos - pos, GROUP, label, text, close=close, layout=rule.layout))
             stack.append(_Frame(g, rule, end_pat=self.end_pats.get(id(rule)) if rule.action == "open" else None))
             return r.pos, "open"
         if a == "close":
@@ -604,7 +608,7 @@ class RuleEngine:
             count = nums[0] or 0
             text, _ = self._read_fields(r, rule.fields[1:])
             desc = (f"(길이 {count})" if a == "len_block" else f"({count}개)") + (f" {text}" if text else "")
-            g = parent.add(Node(pos, r.pos - pos, GROUP, label, desc, close=close))
+            g = parent.add(Node(pos, r.pos - pos, GROUP, label, desc, close=close, layout=rule.layout))
             if count == 0:
                 return r.pos, "item"
             if a == "len_block":

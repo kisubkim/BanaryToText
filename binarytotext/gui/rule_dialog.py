@@ -22,6 +22,8 @@ class RuleDialog(QDialog):
         self.rule = copy.deepcopy(rule)
         self.ruleset = ruleset
         self.data = data
+        # Preview with the main window's output options (labels, layout, commas).
+        self.render_opts = parent._render_opts() if hasattr(parent, "_render_opts") else RenderOptions()
 
         self.tag = QLineEdit(self.rule.tag)
         self.tag.setPlaceholderText('예: 09   5F 20   0A??   "STR"')
@@ -32,6 +34,10 @@ class RuleDialog(QDialog):
         set_combo(self.action, self.rule.action)
         self.bracket = combo([("[", "[ ]"), ("{", "{ }")])
         set_combo(self.bracket, self.rule.bracket)
+        self.layout = combo([("", "툴바 설정 따름"), ("lines", "줄마다 (항목마다 줄바꿈)"),
+                             ("inline", "한 줄로 (쉼표로 이어서)")])
+        set_combo(self.layout, self.rule.layout)
+        self.layout.setToolTip("이 그룹의 항목을 줄마다 쓸지 한 줄로 이어 쓸지. 툴바의 '그룹' 설정보다 우선합니다.")
         self.comment = QLineEdit(self.rule.comment)
         self.end_tag = QLineEdit(self.rule.end_tag)
         self.end_tag.setPlaceholderText("예: 00   FF FF   (비우면 공통 '그룹 닫기' 규칙으로 닫음)")
@@ -53,6 +59,7 @@ class RuleDialog(QDialog):
         top.addRow("", self.action_help)
         top.addRow("키", self.key)
         top.addRow("그룹 괄호", self.bracket)
+        top.addRow("그룹 표시", self.layout)
         top.addRow("닫는 태그 (hex)", self.end_tag)
         top.addRow("", self.end_msg)
         top.addRow("메모", self.comment)
@@ -81,7 +88,7 @@ class RuleDialog(QDialog):
 
         for w in (self.tag, self.name, self.comment, self.end_tag):
             w.textChanged.connect(self._changed)
-        for c in (self.action, self.bracket):
+        for c in (self.action, self.bracket, self.layout):
             c.currentIndexChanged.connect(self._changed)
         self.key.toggled.connect(self._changed)
         self.fields_editor.changed.connect(self._changed)
@@ -97,7 +104,10 @@ class RuleDialog(QDialog):
         self.key.setEnabled(self.rule.action == "value")
         self.rule.key = self.key.isChecked() and self.rule.action == "value"
         self.action_help.setText(_ACTION_HELP.get(self.rule.action, ""))
-        self.bracket.setEnabled(self.rule.action in ("open", "toggle", "len_block", "count_block"))
+        is_group = self.rule.action in ("open", "toggle", "len_block", "count_block")
+        self.bracket.setEnabled(is_group)
+        self.layout.setEnabled(is_group)
+        self.rule.layout = self.layout.currentData() if is_group else ""
         is_open = self.rule.action == "open"
         self.end_tag.setEnabled(is_open)
         end_ok = True
@@ -136,7 +146,9 @@ class RuleDialog(QDialog):
                      rules=[r for r in self.ruleset.rules if r is not self.original] + [self.rule])
         chunk = self.data[pos:pos + 512]
         root = RuleEngine(rs).decode(chunk)
-        text = render_text(root, chunk, RenderOptions(offsets=False, max_lines=6))
+        opts = copy.copy(self.render_opts)
+        opts.offsets, opts.raw_hex, opts.max_lines = False, False, 6
+        text = render_text(root, chunk, opts)
         self.preview.setPlainText(f"위치 0x{pos:X}:\n{text}")
 
     def _accept(self) -> None:

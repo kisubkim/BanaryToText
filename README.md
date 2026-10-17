@@ -57,7 +57,8 @@
 - **가운데 탭**: 규칙 / 포맷 옵션 / 자동 분석
 - **오른쪽 결과**: 텍스트와 트리. 텍스트 줄을 클릭하면 hex 위치가, hex 를 클릭하면 해당 텍스트 줄이 표시됩니다.
 - 툴바: 해석 방식(사용자 규칙 또는 내장 포맷), 전처리, 텍스트·JSON 저장, 출력 모양:
-  오프셋 / 원본 hex / **이름**(끄면 라벨 없이 값만) / **배열 한 줄**(`[21, 22, 24]`). 출력 모양은 저장 파일에도 적용됩니다.
+  오프셋 / 원본 hex / **이름**(끄면 라벨 없이 값만) / **쉼표**(그룹 안 항목 뒤) / **그룹**(줄마다, 배열만 한 줄,
+  한 줄로). 그룹 규칙마다 *그룹 표시* 로 따로 정할 수도 있습니다. 출력 모양은 저장 파일에도 적용됩니다.
 
 ## 사용자 규칙
 
@@ -129,7 +130,7 @@ byte 수만 / 그 자리에서 해석 중단. hex 화면에서는 주황색으�
 ## 명령줄 (`btt.exe` 또는 `python -m binarytotext`)
 
 ```
-btt decode 파일 --rules 규칙.json [-o 결과.txt] [--no-offsets] [--raw] [--json] [--no-labels] [--inline-arrays]
+btt decode 파일 --rules 규칙.json [-o 결과.txt] [--no-offsets] [--raw] [--json] [--no-labels] [--commas] [--layout lines|arrays|inline]
 btt decode 파일 --library 규칙폴더 -o 결과.txt   # 식별 조건으로 규칙 세트 자동 선택
 btt decode 파일 --format protobuf --opt nested=true --pre zlib
 btt batch 폴더 -r --include "*.bin" --library 규칙폴더 --rules 기본.json -d 출력폴더 --name "{stem}_해석.txt"

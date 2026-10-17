@@ -27,6 +27,8 @@ class Node:
     close: str = ""
     # The label is a key read from the data (rendered "key = value"), not a rule name.
     key: bool = False
+    # Groups: "lines" / "inline" overrides the renderer's layout option; "" follows it.
+    layout: str = ""
 
     @property
     def end(self) -> int:

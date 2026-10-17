@@ -117,10 +117,19 @@ def test_key_rule_and_output_toggles(win, tmp_path):
     assert not dlg.key.isEnabled() and not dlg.rule.key
     win.ruleset.rules[0] = Rule("09", "문자열", fields=[FieldSpec("cstring")], key=True)
     win._rules_changed()
-    win.chk_inline.setChecked(True)
+    win.layout_combo.setCurrentIndex(win.layout_combo.findData("arrays"))
     win.chk_labels.setChecked(False)
     wait_for(lambda: "volume = 30" in win.text.toPlainText() and "[1, 2]" in win.text.toPlainText())
     assert "정수" not in win.text.toPlainText()
+    win.layout_combo.setCurrentIndex(win.layout_combo.findData("lines"))
+    win.chk_commas.setChecked(True)
+    wait_for(lambda: "1," in win.text.toPlainText() and "[1, 2]" not in win.text.toPlainText())
+    # Per-rule layout wins over the toolbar; the rule dialog preview follows the toolbar options.
+    dlg = RuleDialog(win, win.ruleset.rules[2], win.ruleset, win.data)
+    dlg.layout.setCurrentIndex(dlg.layout.findData("inline"))
+    assert dlg.rule.layout == "inline" and "[1, 2]" in dlg.preview.toPlainText()
+    dlg.action.setCurrentIndex(dlg.action.findData("value"))
+    assert not dlg.layout.isEnabled() and dlg.rule.layout == ""
 
 
 def test_rule_dialog_end_tag(win):
