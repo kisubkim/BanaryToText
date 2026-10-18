@@ -17,13 +17,14 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComb
                                QTableWidgetItem, QTabWidget, QTextEdit, QToolBar, QToolButton, QTreeWidget,
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
-from .. import __version__, batch, heuristics, library, preprocess
+from .. import __version__, batch, batfile, heuristics, library, preprocess
 from ..formats import REGISTRY
 from ..model import ERROR, GROUP, INFO, UNKNOWN, Node, compute_stats, deepest_at
 from ..reader import float_digits
 from ..render import LAYOUTS, RenderOptions, render_text, write_json, write_text
 from ..rules import (ACTIONS, ENCODINGS, UNKNOWN_MODES, FieldSpec, Rule, RuleEngine, RuleSet, example_ruleset,
                      parse_tag)
+from .bat_dialog import BatDialog
 from .batch_dialog import BatchDialog
 from .hexview import HexView, Inspector, mono_font
 from .header_dialog import HeaderDialog
@@ -237,6 +238,8 @@ class MainWindow(QMainWindow):
         act("JSON 저장", self.save_json, None, "해석 트리를 JSON으로 저장")
         act("여러 파일 변환", self.batch_convert, "Ctrl+B",
             "여러 파일·폴더를 현재 설정(또는 규칙 폴더 자동 선택)으로 한 번에 변환 (Ctrl+B)")
+        act("bat 만들기", self.make_bat, None,
+            "현재 설정으로 여러 파일을 변환하는 bat 파일(btt.exe batch …)을 만듭니다")
         tb.addSeparator()
         tb.addWidget(QLabel(" 해석 방식 "))
         self.mode = QComboBox()
@@ -265,12 +268,15 @@ class MainWindow(QMainWindow):
         act("다시 해석", self.decode, "F5")
         act("자동 분석", self.run_analysis, "F6", "모르는 파일 분석: 포맷 추정, 태그 후보, 문자열 (F6)")
 
-        # Second row: how the result is written (screen, saved files, batch).
-        self.addToolBarBreak()
-        tb = QToolBar("출력")
-        tb.setMovable(False)
-        self.addToolBar(tb)
-        tb.addWidget(QLabel(" 출력  "))
+    def _build_output_options(self) -> QWidget:
+        """Two rows above the result tabs: how the result is written (screen, saved files, batch)."""
+        box = QWidget()
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(2, 0, 2, 4)
+        lay.setSpacing(4)
+        row1, row2 = QHBoxLayout(), QHBoxLayout()
+        lay.addLayout(row1)
+        lay.addLayout(row2)
         self.chk_offsets = QCheckBox("오프셋")
         self.chk_offsets.setChecked(self.settings.value("offsets", True, type=bool))
         self.chk_raw = QCheckBox("원본 hex")
@@ -289,8 +295,9 @@ class MainWindow(QMainWindow):
         self.chk_quotes.setChecked(self.settings.value("quotes", True, type=bool))
         for c in (self.chk_offsets, self.chk_raw, self.chk_labels, self.chk_quotes, self.chk_commas):
             c.toggled.connect(self.schedule)
-            tb.addWidget(c)
-        tb.addWidget(QLabel(" 그룹 "))
+            row1.addWidget(c)
+        row1.addSpacing(10)
+        row1.addWidget(QLabel("그룹"))
         self.layout_combo = QComboBox()
         for k, v in LAYOUTS.items():
             self.layout_combo.addItem(v, k)
@@ -299,9 +306,9 @@ class MainWindow(QMainWindow):
                                      "규칙 편집 창에서 그룹 규칙마다 따로 정할 수 있습니다.")
         self.layout_combo.setCurrentIndex(max(0, self.layout_combo.findData(self.settings.value("layout", "lines"))))
         self.layout_combo.currentIndexChanged.connect(self.schedule)
-        tb.addWidget(self.layout_combo)
-        tb.addSeparator()
-        tb.addWidget(QLabel(" 실수 유효 숫자 "))
+        row1.addWidget(self.layout_combo)
+        row1.addStretch(1)
+        row2.addWidget(QLabel("실수 유효 숫자"))
         self.digits_spin = QSpinBox()
         self.digits_spin.setRange(0, 17)
         self.digits_spin.setSpecialValueText("자동")
@@ -312,9 +319,9 @@ class MainWindow(QMainWindow):
         self.digits_spin.setValue(self.settings.value("float_digits", 0, type=int))
         self.digits_spin.setKeyboardTracking(False)
         self.digits_spin.valueChanged.connect(self.schedule)
-        tb.addWidget(self.digits_spin)
-        tb.addSeparator()
-        tb.addWidget(QLabel(" 화면 줄 수 "))
+        row2.addWidget(self.digits_spin)
+        row2.addSpacing(12)
+        row2.addWidget(QLabel("화면 줄 수"))
         self.lines_spin = QSpinBox()
         self.lines_spin.setRange(1_000, 10_000_000)
         self.lines_spin.setSingleStep(50_000)
@@ -325,7 +332,9 @@ class MainWindow(QMainWindow):
         self.lines_spin.setValue(self.settings.value("max_lines", MAX_TEXT_LINES, type=int))
         self.lines_spin.setKeyboardTracking(False)  # re-decode when typing is finished, not per digit
         self.lines_spin.valueChanged.connect(self.schedule)
-        tb.addWidget(self.lines_spin)
+        row2.addWidget(self.lines_spin)
+        row2.addStretch(1)
+        return box
 
     def _build_body(self) -> None:
         # Left: hex + inspector
@@ -363,13 +372,21 @@ class MainWindow(QMainWindow):
         out = QTabWidget()
         out.addTab(self.text, "텍스트")
         out.addTab(self.tree, "트리")
+        self.out_panel = QWidget()
+        rl = QVBoxLayout(self.out_panel)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.setSpacing(0)
+        rl.addWidget(self._build_output_options())
+        rl.addWidget(out, 1)
 
         main = QSplitter(Qt.Horizontal)
         main.addWidget(left)
         main.addWidget(self.tabs)
-        main.addWidget(out)
+        main.addWidget(self.out_panel)
         hw = self.hex.preferred_width()
-        main.setSizes([hw, 460, max(400, 1600 - hw - 460)])
+        main.setSizes([hw, 460, max(480, 1600 - hw - 460)])
+        for i, stretch in enumerate((0, 0, 1)):  # window resizes go to the result panel; hex keeps its width
+            main.setStretchFactor(i, stretch)
         self.setCentralWidget(main)
         self.stats_label = QLabel()
         self.statusBar().addPermanentWidget(self.stats_label)
@@ -411,11 +428,12 @@ class MainWindow(QMainWindow):
         self.rs_depth.setRange(1, 10000)
         self.rs_depth.setToolTip("그룹이 이 단계보다 깊게 열리면 해석을 멈춥니다.\n"
                                  "닫는 태그가 틀리면 그룹이 끝없이 겹쳐 열려 메모리를 크게 쓰는 것을 막습니다.")
-        unkrow = QHBoxLayout()
-        unkrow.addWidget(self.rs_unknown, 1)
-        unkrow.addWidget(QLabel("최대 그룹 깊이"))
-        unkrow.addWidget(self.rs_depth)
-        form.addRow("규칙에 없는 byte", unkrow)
+        form.addRow("규칙에 없는 byte", self.rs_unknown)
+        deprow = QHBoxLayout()
+        deprow.addWidget(self.rs_depth)
+        deprow.addWidget(QLabel("단계까지 (넘으면 해석 중단)"))
+        deprow.addStretch(1)
+        form.addRow("최대 그룹 깊이", deprow)
         idrow = QHBoxLayout()
         self.rs_match_off = QSpinBox()
         self.rs_match_off.setRange(0, 1 << 30)
@@ -689,6 +707,34 @@ class MainWindow(QMainWindow):
         self.batch_dlg.show()
         self.batch_dlg.raise_()
         self.batch_dlg.activateWindow()
+
+    def bat_spec(self) -> batfile.BatSpec | None:
+        """Current method/options as a BatSpec. A .bat needs the rule set as a saved file: offers to save."""
+        mode = self.mode.currentData()
+        if mode == RULES_MODE and (self.rules_path is None or self._dirty()):
+            ans = QMessageBox.question(
+                self, "bat 파일 만들기",
+                "bat 파일은 저장된 규칙 JSON 파일을 씁니다. 현재 규칙 세트를 지금 저장할까요?",
+                QMessageBox.Save | QMessageBox.Cancel, QMessageBox.Save)
+            if ans != QMessageBox.Save:
+                return None
+            self.save_rules()
+            if self.rules_path is None or self._dirty():
+                return None
+        st, desc = self.batch_settings()
+        return batfile.BatSpec(
+            rules=str(self.rules_path) if mode == RULES_MODE else "", fmt=st.fmt, fmt_opts=st.fmt_opts,
+            library=st.library_dir, pre=st.pre, pre_arg=st.pre_arg, render=st.render,
+            description=desc + (f" ({self.rules_path.name})" if mode == RULES_MODE else ""))
+
+    def make_bat(self) -> BatDialog | None:
+        spec = self.bat_spec()
+        if spec is None:
+            return None
+        start = str(self.path.parent) if self.path else ""
+        dlg = BatDialog(self, spec, self.settings, start)
+        dlg.show()
+        return dlg
 
     # ------------------------------------------------------------ decode
     def _render_opts(self) -> RenderOptions:

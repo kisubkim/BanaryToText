@@ -219,11 +219,11 @@ def main() -> None:
     w.chk_commas.setChecked(True)
     set_layout("arrays")
     wait(lambda: "[21, 22, 24]" in w.text.toPlainText() and '"Sensor-A",' in w.text.toPlainText())
-    save(w.text.parent().parent(), "16_values_only.png")
+    save(w.out_panel, "16_values_only.png")
     w.chk_labels.setChecked(True)
     w.chk_commas.setChecked(False)
     wait(lambda: "이름:" in w.text.toPlainText() and "기록 [21" in w.text.toPlainText())
-    save(w.text.parent().parent(), "17_inline_arrays.png")
+    save(w.out_panel, "17_inline_arrays.png")
     set_layout("lines")
     wait(lambda: "기록 [" in w.text.toPlainText() and "[21" not in w.text.toPlainText())
 
@@ -332,7 +332,7 @@ def main() -> None:
     set_layout("inline")
     w.chk_quotes.setChecked(False)
     wait(lambda: "network = {ip = 192.168.0.10, port = 8080}" in w.text.toPlainText())
-    save(w.text.parent().parent(), "20_inline_groups.png")
+    save(w.out_panel, "20_inline_groups.png")
     w.chk_quotes.setChecked(True)
     set_layout("lines")
     w.chk_commas.setChecked(False)
@@ -360,6 +360,19 @@ def main() -> None:
     wait(lambda: bd.job is None, 30)
     save(bd, "15_batch_done.png")
     bd.close()
+
+    # 11. bat file (the auto-selected rule set is saved, so no save prompt)
+    if w._dirty():
+        raise RuntimeError("rule set changed by the script: make_bat would ask to save")
+    bat = w.make_bat()
+    bat.drop.setChecked(True)
+    bat.include.setText("*.bin")
+    bat.out_dir.setText(r"D:\변환결과")
+    bat.pattern.setText("{stem}_해석.txt")
+    bat.btt.setText(r"C:\BinaryToText\btt.exe")  # what the installed app would fill in
+    bat.move(60, 60)
+    save(bat, "23_bat_dialog.png")
+    bat.close()
     w.close()
 
 

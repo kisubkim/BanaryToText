@@ -322,3 +322,34 @@ def test_screen_line_limit_and_float_digits(win, tmp_path):
     assert win.digits_spin.text() == "자동"
     win.close()
     assert win.settings.value("max_lines", type=int) == 10_000
+
+
+def test_output_options_above_results(win):
+    # The output options sit in the result panel, above the text/tree tabs.
+    for w in (win.chk_offsets, win.chk_quotes, win.layout_combo, win.digits_spin, win.lines_spin):
+        assert win.out_panel.isAncestorOf(w)
+    assert win.out_panel.isAncestorOf(win.text)
+
+
+def test_make_bat(win, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+    rules_file, bat = tmp_path / "규칙.json", tmp_path / "변환.bat"
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Save)
+    answers = iter([(str(rules_file), ""), (str(bat), "")])  # save rules first, then the .bat
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: next(answers))
+    win.chk_commas.setChecked(True)
+    win.digits_spin.setValue(5)
+    dlg = win.make_bat()
+    assert dlg is not None and rules_file.exists()  # unsaved rules were saved for the .bat
+    dlg.fixed.setChecked(True)
+    dlg.input.setText(str(tmp_path / "data"))
+    dlg.out_dir.setText(str(tmp_path / "out"))
+    preview = dlg.preview.toPlainText()
+    assert f"--rules {rules_file}" in preview.replace('"', "") and "--commas" in preview
+    assert "--float-digits 5" in preview and "%~1" not in preview
+    assert dlg.save() == bat and bat.exists()
+    assert win.settings.value("bat_out_dir") == str(tmp_path / "out")
+    dlg.drop.setChecked(True)
+    dlg.input.setText("")
+    assert "%*" in dlg.preview.toPlainText() and dlg.save_btn.isEnabled()
+    dlg.close()

@@ -35,10 +35,10 @@ class RuleDialog(QDialog):
         set_combo(self.action, self.rule.action)
         self.bracket = combo([("[", "[ ]"), ("{", "{ }")])
         set_combo(self.bracket, self.rule.bracket)
-        self.layout = combo([("", "툴바 설정 따름"), ("lines", "줄마다 (항목마다 줄바꿈)"),
+        self.layout = combo([("", "출력 설정 따름"), ("lines", "줄마다 (항목마다 줄바꿈)"),
                              ("inline", "한 줄로 (쉼표로 이어서)")])
         set_combo(self.layout, self.rule.layout)
-        self.layout.setToolTip("이 그룹의 항목을 줄마다 쓸지 한 줄로 이어 쓸지. 툴바의 '그룹' 설정보다 우선합니다.")
+        self.layout.setToolTip("이 그룹의 항목을 줄마다 쓸지 한 줄로 이어 쓸지. 결과 위 출력 설정의 '그룹'보다 우선합니다.")
         self.comment = QLineEdit(self.rule.comment)
         self.end_tag = QLineEdit(self.rule.end_tag)
         self.end_tag.setPlaceholderText("예: 00   FF FF   (비우면 공통 '그룹 닫기' 규칙으로 닫음)")

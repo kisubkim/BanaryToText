@@ -187,7 +187,7 @@ def iter_lines(root: Node, data: bytes, opts: RenderOptions | None = None) -> It
 
     for c in root.children:
         if not (yield from emit(c, 0)):
-            yield root, f"… 출력이 {opts.max_lines:,}줄에서 잘렸습니다 (툴바 '화면 줄 수' 로 늘릴 수 있고, 저장 파일에는 전체가 들어갑니다)"
+            yield root, f"… 출력이 {opts.max_lines:,}줄에서 잘렸습니다 (결과 위 '화면 줄 수' 로 늘릴 수 있고, 저장 파일에는 전체가 들어갑니다)"
             break
 
 
