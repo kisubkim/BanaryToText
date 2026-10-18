@@ -20,7 +20,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComb
 from .. import __version__, batch, heuristics, library, preprocess
 from ..formats import REGISTRY
 from ..model import ERROR, GROUP, INFO, UNKNOWN, Node, compute_stats, deepest_at
-from ..render import LAYOUTS, RenderOptions, render_json, render_text
+from ..reader import float_digits
+from ..render import LAYOUTS, RenderOptions, render_text, write_json, write_text
 from ..rules import (ACTIONS, ENCODINGS, UNKNOWN_MODES, FieldSpec, Rule, RuleEngine, RuleSet, example_ruleset,
                      parse_tag)
 from .batch_dialog import BatchDialog
@@ -32,7 +33,7 @@ from .theme import TITLES as THEME_TITLES
 from .theme import apply_theme
 
 RULES_MODE = "__rules__"
-MAX_TEXT_LINES = 200_000
+MAX_TEXT_LINES = 200_000  # default of the screen line limit (toolbar)
 
 
 def build_marks(root: Node, n: int) -> bytearray:
@@ -56,21 +57,24 @@ def build_marks(root: Node, n: int) -> bytearray:
 class DecodeJob(QThread):
     done = Signal(int, object)
 
-    def __init__(self, gen: int, data: bytes, mode: str, ruleset: RuleSet, opts: dict, ropts: RenderOptions):
+    def __init__(self, gen: int, data: bytes, mode: str, ruleset: RuleSet, opts: dict, ropts: RenderOptions,
+                 max_lines: int = MAX_TEXT_LINES):
         super().__init__()
         self.setStackSize(64 << 20)  # deep recursive formats
         self.gen, self.data, self.mode, self.ruleset, self.opts, self.ropts = gen, data, mode, ruleset, opts, ropts
+        self.max_lines = max_lines
 
     def run(self) -> None:
         t0 = time.perf_counter()
         try:
-            if self.mode == RULES_MODE:
-                root = RuleEngine(self.ruleset).decode(self.data)
-            else:
-                root = REGISTRY[self.mode].decode(self.data, self.opts)
+            with float_digits(self.ropts.float_digits):
+                if self.mode == RULES_MODE:
+                    root = RuleEngine(self.ruleset).decode(self.data)
+                else:
+                    root = REGISTRY[self.mode].decode(self.data, self.opts)
             lines: list[Node] = []
             ro = copy.copy(self.ropts)
-            ro.max_lines = MAX_TEXT_LINES
+            ro.max_lines = self.max_lines
             text = render_text(root, self.data, ro, lines)
             res = dict(root=root, text=text, lines=lines, stats=compute_stats(root, len(self.data)),
                        marks=build_marks(root, len(self.data)), elapsed=time.perf_counter() - t0)
@@ -92,6 +96,34 @@ class AnalyzeJob(QThread):
             self.done.emit(heuristics.analyze(self.data))
         except Exception:
             self.done.emit(traceback.format_exc())
+
+
+class SaveJob(QThread):
+    """Full decode + streamed write off the GUI thread (big stack, no giant string in memory)."""
+    done = Signal(bool, str)
+
+    def __init__(self, path: str, data: bytes, mode: str, ruleset: RuleSet, opts: dict,
+                 ropts: RenderOptions, as_json: bool):
+        super().__init__()
+        self.setStackSize(64 << 20)
+        self.path, self.data, self.mode, self.ruleset, self.opts, self.ropts = path, data, mode, ruleset, opts, ropts
+        self.as_json = as_json
+
+    def run(self) -> None:
+        try:
+            with float_digits(self.ropts.float_digits):
+                root = (RuleEngine(self.ruleset).decode(self.data) if self.mode == RULES_MODE
+                        else REGISTRY[self.mode].decode(self.data, self.opts))
+            if self.as_json:
+                write_json(self.path, root)
+                msg = f"저장: {self.path}"
+            else:
+                msg = f"저장: {self.path} ({write_text(self.path, root, self.data, self.ropts):,}줄)"
+            self.done.emit(True, msg)
+        except MemoryError:
+            self.done.emit(False, "메모리가 부족해 저장하지 못했습니다. 그룹 규칙(닫는 태그)이 맞는지 확인하세요.")
+        except Exception:
+            self.done.emit(False, traceback.format_exc())
 
 
 class CenteredCheckDelegate(QStyledItemDelegate):
@@ -164,6 +196,7 @@ class MainWindow(QMainWindow):
         self._syncing = False
         self.report = None
         self.batch_dlg: BatchDialog | None = None
+        self.save_job: SaveJob | None = None
         self.theme = apply_theme(QApplication.instance(), self.settings.value("theme", DEFAULT_THEME))
 
         self.setWindowTitle(f"BinaryToText {__version__}")
@@ -229,6 +262,15 @@ class MainWindow(QMainWindow):
         self.pre_arg.editingFinished.connect(self._apply_preprocess)
         tb.addWidget(self.pre_arg)
         tb.addSeparator()
+        act("다시 해석", self.decode, "F5")
+        act("자동 분석", self.run_analysis, "F6", "모르는 파일 분석: 포맷 추정, 태그 후보, 문자열 (F6)")
+
+        # Second row: how the result is written (screen, saved files, batch).
+        self.addToolBarBreak()
+        tb = QToolBar("출력")
+        tb.setMovable(False)
+        self.addToolBar(tb)
+        tb.addWidget(QLabel(" 출력  "))
         self.chk_offsets = QCheckBox("오프셋")
         self.chk_offsets.setChecked(self.settings.value("offsets", True, type=bool))
         self.chk_raw = QCheckBox("원본 hex")
@@ -259,8 +301,31 @@ class MainWindow(QMainWindow):
         self.layout_combo.currentIndexChanged.connect(self.schedule)
         tb.addWidget(self.layout_combo)
         tb.addSeparator()
-        act("다시 해석", self.decode, "F5")
-        act("자동 분석", self.run_analysis, "F6", "모르는 파일 분석: 포맷 추정, 태그 후보, 문자열 (F6)")
+        tb.addWidget(QLabel(" 실수 유효 숫자 "))
+        self.digits_spin = QSpinBox()
+        self.digits_spin.setRange(0, 17)
+        self.digits_spin.setSpecialValueText("자동")
+        self.digits_spin.setSuffix(" 자리")
+        self.digits_spin.setToolTip("float/double 값을 몇 자리 유효 숫자로 쓸지. 저장 파일·여러 파일 변환에도 적용됩니다.\n"
+                                     "자동 = 값을 정확히 나타내는 가장 짧은 표기 (float32 36.6 → 36.6).\n"
+                                     "예: 3자리 → 3.14, 1.23e+05 / float32 의 실제 값을 보려면 9, double 은 17.")
+        self.digits_spin.setValue(self.settings.value("float_digits", 0, type=int))
+        self.digits_spin.setKeyboardTracking(False)
+        self.digits_spin.valueChanged.connect(self.schedule)
+        tb.addWidget(self.digits_spin)
+        tb.addSeparator()
+        tb.addWidget(QLabel(" 화면 줄 수 "))
+        self.lines_spin = QSpinBox()
+        self.lines_spin.setRange(1_000, 10_000_000)
+        self.lines_spin.setSingleStep(50_000)
+        self.lines_spin.setGroupSeparatorShown(True)
+        self.lines_spin.setSuffix(" 줄")
+        self.lines_spin.setToolTip("텍스트 탭에 보여 줄 최대 줄 수. 넘으면 잘라서 보여 줍니다.\n"
+                                  "저장 파일에는 항상 전체가 들어갑니다. 크게 하면 화면 표시에 메모리를 더 씁니다.")
+        self.lines_spin.setValue(self.settings.value("max_lines", MAX_TEXT_LINES, type=int))
+        self.lines_spin.setKeyboardTracking(False)  # re-decode when typing is finished, not per digit
+        self.lines_spin.valueChanged.connect(self.schedule)
+        tb.addWidget(self.lines_spin)
 
     def _build_body(self) -> None:
         # Left: hex + inspector
@@ -342,7 +407,15 @@ class MainWindow(QMainWindow):
         form.addRow("규칙 세트 이름", self.rs_name)
         form.addRow("기본 엔디언", self.rs_endian)
         form.addRow("기본 문자 인코딩", self.rs_enc)
-        form.addRow("규칙에 없는 byte", self.rs_unknown)
+        self.rs_depth = QSpinBox()
+        self.rs_depth.setRange(1, 10000)
+        self.rs_depth.setToolTip("그룹이 이 단계보다 깊게 열리면 해석을 멈춥니다.\n"
+                                 "닫는 태그가 틀리면 그룹이 끝없이 겹쳐 열려 메모리를 크게 쓰는 것을 막습니다.")
+        unkrow = QHBoxLayout()
+        unkrow.addWidget(self.rs_unknown, 1)
+        unkrow.addWidget(QLabel("최대 그룹 깊이"))
+        unkrow.addWidget(self.rs_depth)
+        form.addRow("규칙에 없는 byte", unkrow)
         idrow = QHBoxLayout()
         self.rs_match_off = QSpinBox()
         self.rs_match_off.setRange(0, 1 << 30)
@@ -376,6 +449,7 @@ class MainWindow(QMainWindow):
         self.rs_endian.currentIndexChanged.connect(self._rs_settings_changed)
         self.rs_enc.currentTextChanged.connect(self._rs_settings_changed)
         self.rs_unknown.currentIndexChanged.connect(self._rs_settings_changed)
+        self.rs_depth.valueChanged.connect(self._rs_settings_changed)
 
         hrow = QHBoxLayout()
         self.hf_label = QLabel()
@@ -553,36 +627,41 @@ class MainWindow(QMainWindow):
         except Exception:
             return False
 
-    def _render_full(self) -> tuple[Node, str] | None:
+    def save_text(self) -> None:
+        self._save("텍스트로 저장", ".txt", "텍스트 (*.txt);;모든 파일 (*)", as_json=False)
+
+    def save_json(self) -> None:
+        self._save("JSON으로 저장", ".json", "JSON (*.json)", as_json=True)
+
+    def _save(self, title: str, suffix: str, filters: str, as_json: bool) -> SaveJob | None:
         if not self.data and not self.path:
             QMessageBox.information(self, "저장", "먼저 파일을 여세요.")
             return None
+        if self.save_job is not None:
+            QMessageBox.information(self, "저장", "이전 저장이 아직 진행 중입니다.")
+            return None
+        default = str(self.path.with_suffix(self.path.suffix + suffix)) if self.path else ""
+        p, _ = QFileDialog.getSaveFileName(self, title, default, filters)
+        if not p:
+            return None
         mode = self.mode.currentData()
-        root = (RuleEngine(self.ruleset).decode(self.data) if mode == RULES_MODE
-                else REGISTRY[mode].decode(self.data, self._current_opts()))
-        return root, mode
+        job = SaveJob(p, self.data, mode, copy.deepcopy(self.ruleset), dict(self._current_opts()),
+                      self._render_opts(), as_json)
+        job.done.connect(self._on_saved)
+        job.finished.connect(lambda j=job: self.jobs.remove(j) if j in self.jobs else None)
+        self.jobs.append(job)
+        self.save_job = job
+        self.statusBar().showMessage(f"저장 중… {p}")
+        job.start()
+        return job
 
-    def save_text(self) -> None:
-        r = self._render_full()
-        if not r:
-            return
-        root, _ = r
-        default = str(self.path.with_suffix(self.path.suffix + ".txt")) if self.path else ""
-        p, _ = QFileDialog.getSaveFileName(self, "텍스트로 저장", default, "텍스트 (*.txt);;모든 파일 (*)")
-        if p:
-            text = render_text(root, self.data, self._render_opts())
-            Path(p).write_text(text, encoding="utf-8")
-            self.statusBar().showMessage(f"저장: {p} ({text.count(chr(10)):,}줄)")
-
-    def save_json(self) -> None:
-        r = self._render_full()
-        if not r:
-            return
-        default = str(self.path.with_suffix(self.path.suffix + ".json")) if self.path else ""
-        p, _ = QFileDialog.getSaveFileName(self, "JSON으로 저장", default, "JSON (*.json)")
-        if p:
-            Path(p).write_text(render_json(r[0]), encoding="utf-8")
-            self.statusBar().showMessage(f"저장: {p}")
+    def _on_saved(self, ok: bool, msg: str) -> None:
+        self.save_job = None
+        if ok:
+            self.statusBar().showMessage(msg)
+        else:
+            self.statusBar().showMessage("저장 실패")
+            QMessageBox.warning(self, "저장 실패", msg)
 
     def batch_settings(self) -> tuple[batch.Settings, str]:
         """Snapshot of the current method/options for batch conversion, plus a description."""
@@ -615,7 +694,8 @@ class MainWindow(QMainWindow):
     def _render_opts(self) -> RenderOptions:
         return RenderOptions(offsets=self.chk_offsets.isChecked(), raw_hex=self.chk_raw.isChecked(),
                              labels=self.chk_labels.isChecked(), layout=self.layout_combo.currentData(),
-                             commas=self.chk_commas.isChecked(), quotes=self.chk_quotes.isChecked())
+                             commas=self.chk_commas.isChecked(), quotes=self.chk_quotes.isChecked(),
+                             float_digits=self.digits_spin.value())
 
     def _current_opts(self) -> dict:
         mode = self.mode.currentData()
@@ -631,7 +711,7 @@ class MainWindow(QMainWindow):
         self.gen += 1
         mode = self.mode.currentData()
         job = DecodeJob(self.gen, self.data, mode, copy.deepcopy(self.ruleset), dict(self._current_opts()),
-                        self._render_opts())
+                        self._render_opts(), self.lines_spin.value())
         job.done.connect(self._on_decoded)
         job.finished.connect(lambda j=job: self.jobs.remove(j) if j in self.jobs else None)
         self.jobs.append(job)
@@ -838,9 +918,10 @@ class MainWindow(QMainWindow):
         self.rs_enc.blockSignals(True)
         self.rs_enc.setEditText(rs.encoding)
         self.rs_enc.blockSignals(False)
-        self.rs_match_off.blockSignals(True)
-        self.rs_match_off.setValue(rs.match_offset)
-        self.rs_match_off.blockSignals(False)
+        for spin, v in ((self.rs_match_off, rs.match_offset), (self.rs_depth, rs.max_depth)):
+            spin.blockSignals(True)
+            spin.setValue(v)
+            spin.blockSignals(False)
         self.rs_match.setText(rs.match_pattern)
 
         def fsum(fs):
@@ -876,6 +957,7 @@ class MainWindow(QMainWindow):
         rs.encoding = self.rs_enc.currentText().strip() or "ascii"
         rs.unknown = self.rs_unknown.currentData()
         rs.match_offset = self.rs_match_off.value()
+        rs.max_depth = self.rs_depth.value()
         rs.match_pattern = self.rs_match.text().strip()
         if rs.match_pattern:
             try:
@@ -1187,6 +1269,8 @@ class MainWindow(QMainWindow):
         self.settings.setValue("commas", self.chk_commas.isChecked())
         self.settings.setValue("quotes", self.chk_quotes.isChecked())
         self.settings.setValue("layout", self.layout_combo.currentData())
+        self.settings.setValue("float_digits", self.digits_spin.value())
+        self.settings.setValue("max_lines", self.lines_spin.value())
         self.settings.setValue("ruleset_json", self.ruleset.to_json())
         if self.batch_dlg is not None:
             self.batch_dlg.close()

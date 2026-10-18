@@ -14,7 +14,7 @@ ERROR = "error"
 INFO = "info"
 
 
-@dataclass
+@dataclass(slots=True)  # slots: large trees use far less memory
 class Node:
     offset: int
     length: int
@@ -39,9 +39,12 @@ class Node:
         return child
 
     def walk(self) -> Iterator["Node"]:
-        yield self
-        for c in self.children:
-            yield from c.walk()
+        """Pre-order, without recursion (trees can be deep)."""
+        stack = [self]
+        while stack:
+            n = stack.pop()
+            yield n
+            stack.extend(reversed(n.children))
 
     def fit_children(self) -> None:
         """Extend this node so it spans all its children."""

@@ -8,7 +8,8 @@ from pathlib import Path
 
 from . import batch, heuristics, library, preprocess
 from .formats import REGISTRY
-from .render import LAYOUTS, RenderOptions, render_json, render_text
+from .reader import float_digits
+from .render import LAYOUTS, RenderOptions, iter_lines, render_json, write_json, write_text
 from .rules import RuleSet, decode_with_rules
 
 
@@ -24,7 +25,7 @@ def _opt_value(s: str):
 def _render_opts(args) -> RenderOptions:
     return RenderOptions(offsets=not args.no_offsets, raw_hex=args.raw,
                          labels=not args.no_labels, layout=args.layout, commas=args.commas,
-                         quotes=not args.no_quotes)
+                         quotes=not args.no_quotes, float_digits=args.float_digits)
 
 
 def _opts(pairs: list[str]) -> dict:
@@ -97,6 +98,8 @@ def main(argv: list[str] | None = None, gui: bool = True) -> int:
                    help="그룹 표시: lines 줄마다(기본), arrays 값만 든 배열만 한 줄, inline 모든 그룹 한 줄 (규칙의 그룹 표시 설정이 우선)")
     d.add_argument("--commas", action="store_true", help="그룹 안 항목 뒤에 쉼표 (마지막 제외)")
     d.add_argument("--no-quotes", action="store_true", help="문자열을 따옴표 없이 (빈 문자열은 비워 둠)")
+    d.add_argument("--float-digits", type=int, default=0, metavar="N",
+                   help="실수(float/double)를 유효 숫자 N자리로 (0 = 자동: 값을 정확히 나타내는 가장 짧은 표기)")
 
     a = sub.add_parser("analyze", help="자동 분석 보고서")
     a.add_argument("file")
@@ -127,6 +130,8 @@ def main(argv: list[str] | None = None, gui: bool = True) -> int:
                    help="그룹 표시: lines 줄마다(기본), arrays 값만 든 배열만 한 줄, inline 모든 그룹 한 줄 (규칙의 그룹 표시 설정이 우선)")
     b.add_argument("--commas", action="store_true", help="그룹 안 항목 뒤에 쉼표 (마지막 제외)")
     b.add_argument("--no-quotes", action="store_true", help="문자열을 따옴표 없이 (빈 문자열은 비워 둠)")
+    b.add_argument("--float-digits", type=int, default=0, metavar="N",
+                   help="실수(float/double)를 유효 숫자 N자리로 (0 = 자동)")
 
     sub.add_parser("formats", help="내장 포맷 목록")
 
@@ -174,11 +179,16 @@ def main(argv: list[str] | None = None, gui: bool = True) -> int:
             raise SystemExit(f"규칙 폴더 {args.library} 에 이 파일과 맞는 규칙 세트가 없습니다")
         rules = hits[0].ruleset
         sys.stderr.write(f"규칙 자동 선택: {hits[0].path.name}\n")
-    root = decode_bytes(data, rules, args.format, opts)
-    text = render_json(root) if args.json else render_text(
-        root, data, _render_opts(args))
+    with float_digits(args.float_digits):
+        root = decode_bytes(data, rules, args.format, opts)
     if args.output:
-        Path(args.output).write_text(text, encoding="utf-8")
+        if args.json:
+            write_json(args.output, root)
+        else:
+            write_text(args.output, root, data, _render_opts(args))
+    elif args.json:
+        out.write(render_json(root))
     else:
-        out.write(text)
+        for _, line in iter_lines(root, data, _render_opts(args)):
+            out.write(line + "\n")
     return 0

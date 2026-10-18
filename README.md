@@ -30,7 +30,7 @@
 ## 결과 내보내기
 
 툴바 **텍스트 저장 (Ctrl+S)** 은 저장 창에서 원하는 폴더와 파일 이름으로 저장합니다
-(기본값은 원본 옆의 `원본이름.확장자.txt`, UTF-8). 화면에는 최대 20만 줄까지만 보이지만 저장 파일에는 전체가 들어갑니다.
+(기본값은 원본 옆의 `원본이름.확장자.txt`, UTF-8). 화면에는 툴바 *화면 줄 수*(기본 20만 줄)까지만 보이지만 저장 파일에는 전체가 들어갑니다.
 **JSON 저장** 은 오프셋·길이까지 담은 트리를 저장합니다. 명령줄은 `-o 파일이름` 으로 지정합니다.
 
 ### 여러 파일 한 번에 변환 (Ctrl+B)
@@ -56,9 +56,10 @@
   ASCII/UTF-8/CP949/UTF-16 으로 한꺼번에 보여 줍니다.
 - **가운데 탭**: 규칙 / 포맷 옵션 / 자동 분석
 - **오른쪽 결과**: 텍스트와 트리. 텍스트 줄을 클릭하면 hex 위치가, hex 를 클릭하면 해당 텍스트 줄이 표시됩니다.
-- 툴바: 해석 방식(사용자 규칙 또는 내장 포맷), 전처리, 텍스트·JSON 저장, 출력 모양:
+- 툴바 첫째 줄: 해석 방식(사용자 규칙 또는 내장 포맷), 전처리, 텍스트·JSON 저장. 둘째 줄 **출력**:
   오프셋 / 원본 hex / **이름**(끄면 라벨 없이 값만) / **따옴표**(끄면 문자열을 따옴표 없이) / **쉼표**(그룹 안 항목 뒤) / **그룹**(줄마다, 배열만 한 줄,
-  한 줄로). 그룹 규칙마다 *그룹 표시* 로 따로 정할 수도 있습니다. 출력 모양은 저장 파일에도 적용됩니다.
+  한 줄로) / **실수 유효 숫자**(자동 또는 1~17자리) / **화면 줄 수**(화면에만, 기본 20만).
+  그룹 규칙마다 *그룹 표시* 로 따로 정할 수도 있습니다. 출력 모양은 저장 파일에도 적용됩니다.
 - 상태 표시줄 오른쪽 **테마**: 파스텔 블루(기본) / 민트 / 라벤더 / 피치, 소프트 다크, 레트로 터미널, 세피아 종이,
   Windows 기본. 고른 테마는 다음 실행에도 유지됩니다.
 
@@ -74,6 +75,7 @@
 | 동작 | 의미 |
 |---|---|
 | 값 읽기 | 태그 다음의 필드들을 읽어 `이름: 값` 한 줄로 출력. 필드가 없으면 이름만 출력 (1 byte → 글자) |
+| 고정 값 | 뒤의 byte 를 읽지 않고 정한 글자를 그대로 출력 (`01` → `true`). 필드를 넣으면 그만큼 건너뜀 |
 | 그룹 열기 | 배열·구조체 시작. 안쪽은 들여쓰기. **닫는 태그**(예: `00`)를 지정하면 그 그룹이 가장 안쪽일 때만 닫기로 인식하고 다른 규칙보다 우선합니다. 그래서 같은 `00`이 다른 곳에서는 값이나 패딩으로 남습니다 |
 | 그룹 닫기 (공통) | 닫는 태그가 없는 그룹 중 가장 안쪽 것을 닫음 |
 | 그룹 열기/닫기 토글 | 같은 태그로 열고 닫음 (`0A ... 0A`) |
@@ -86,7 +88,10 @@
 길이 접두 문자열(1/2/4 byte 또는 varint), 바이트(hex), BCD, varint, zigzag varint, Unix 시각(초/밀리초),
 건너뛰기, 나머지 전부. 문자 인코딩은 ASCII, UTF-8, CP949/EUC-KR, UTF-16, Shift-JIS, GBK, Big5 등.
 
-**키 = 값**: 값 읽기 규칙에서 *키* 를 체크하면 읽은 문자열이 바로 다음 항목의 이름이 됩니다.
+**최대 그룹 깊이** (규칙 세트, 기본 100): 닫는 태그가 틀려 그룹이 끝없이 겹쳐 열리면 그 깊이에서 해석을 멈추고
+오류로 알려 줍니다. 정말 더 깊은 구조라면 규칙 탭에서 값을 올리면 됩니다.
+
+**키 = 값**: 값 읽기·고정 값 규칙에서 *키* 를 체크하면 읽은 문자열이 바로 다음 항목의 이름이 됩니다.
 `09 "volume" 00 04 1E` → `volume = 30`. 키 다음에 같은 규칙이 또 나오면 그것은 값으로 읽습니다.
 
 **헤더 / 꼬리 (위치 기준 구조)**: 규칙 탭의 *헤더 / 꼬리…* 에서 태그와 상관없이 파일 맨 앞부터 읽을 필드(헤더)와
@@ -132,7 +137,7 @@ byte 수만 / 그 자리에서 해석 중단. hex 화면에서는 주황색으�
 ## 명령줄 (`btt.exe` 또는 `python -m binarytotext`)
 
 ```
-btt decode 파일 --rules 규칙.json [-o 결과.txt] [--no-offsets] [--raw] [--json] [--no-labels] [--no-quotes] [--commas] [--layout lines|arrays|inline]
+btt decode 파일 --rules 규칙.json [-o 결과.txt] [--no-offsets] [--raw] [--json] [--no-labels] [--no-quotes] [--commas] [--layout lines|arrays|inline] [--float-digits N]
 btt decode 파일 --library 규칙폴더 -o 결과.txt   # 식별 조건으로 규칙 세트 자동 선택
 btt decode 파일 --format protobuf --opt nested=true --pre zlib
 btt batch 폴더 -r --include "*.bin" --library 규칙폴더 --rules 기본.json -d 출력폴더 --name "{stem}_해석.txt"
@@ -146,6 +151,46 @@ btt formats            # 내장 포맷과 옵션 목록
 `binarytotext/formats/` 에 모듈을 만들고 `register(Decoder(...))` 를 호출한 뒤
 `formats/__init__.py` 에서 import 합니다. 디코더는 `Node` 트리를 돌려주면 되고, GUI 옵션 화면과
 자동 분석은 등록 정보로 자동 구성됩니다.
+
+## 개발 환경과 릴리스
+
+### 준비물
+- Windows 10/11 (64bit)
+- Python 3.12 (python.org 설치본. `py -3.12` 가 실행되어야 합니다)
+- Git
+
+### 코드 받기와 개발 환경
+
+```powershell
+git clone https://github.com/kisubkim/BanaryToText.git
+cd BanaryToText
+py -3.12 -m venv .venv
+.venv\Scripts\python -m pip install -r requirements-dev.txt   # PySide6, pytest, pyflakes, PyInstaller
+.venv\Scripts\python -m pytest -q                              # 테스트 (GUI 테스트는 화면 없이 실행)
+.venv\Scripts\python -m binarytotext                           # 소스로 실행
+```
+
+`build.ps1` 은 `.venv` 가 없으면 위의 가상 환경 만들기와 패키지 설치를 스스로 하므로, 빌드만 할 때는 바로
+`build.ps1` 을 실행해도 됩니다.
+
+### 릴리스 순서
+
+1. **버전 올리기**: `binarytotext/__init__.py` 의 `__version__` (예: `"0.1.5"`). 창 제목, zip 이름,
+   `BUILD_INFO.txt` 가 모두 이 값을 씁니다.
+2. **화면이 바뀌었으면 설명서 그림 다시 만들기**: `.venv\Scripts\python docs\make_screenshots.py`
+   (창이 잠깐씩 떴다 사라집니다). 그 뒤 `docs/manual.md` 설명이 그림과 맞는지 확인합니다.
+3. **빌드**: `powershell -ExecutionPolicy Bypass -File build.ps1`
+   테스트가 하나라도 실패하면 빌드가 멈춥니다. 결과는 `dist\BinaryToText-<버전>-win64.zip`.
+   `dist\BinaryToText.exe` 를 실행 중이면 덮어쓰지 못해 실패하니 먼저 닫으세요.
+4. **커밋과 푸시**: `git commit` 후 `git push`.
+5. **GitHub 릴리스 만들기** (둘 중 하나)
+   - 웹: 저장소의 **Releases → Draft a new release** → 태그 `v<버전>` (새로 만들기, 대상 `main`) →
+     제목 `BinaryToText <버전>` → 바뀐 점 작성 → zip 파일을 끌어다 첨부 → **Publish release**
+   - [GitHub CLI](https://cli.github.com/):
+     `gh release create v<버전> dist\BinaryToText-<버전>-win64.zip --title "BinaryToText <버전>" --notes-file 노트.md`
+6. 배포하는 것은 **zip(폴더형)** 입니다. 단일 exe 는 Qt 를 교체할 수 없어 LGPL 조건상 남에게 주는 용도로 쓰지 않습니다
+   (아래 라이선스 참고). 릴리스 노트에 zip 의 SHA-256 을 적어 두면 받은 사람이 확인할 수 있습니다:
+   `Get-FileHash dist\BinaryToText-<버전>-win64.zip -Algorithm SHA256`
 
 ## 라이선스
 

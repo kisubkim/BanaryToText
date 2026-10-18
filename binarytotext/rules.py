@@ -37,6 +37,7 @@ FIELD_TYPES = {
 
 ACTIONS = {
     "value": "값 읽기",
+    "const": "고정 값 (태그 → 정한 텍스트)",
     "open": "그룹 열기",
     "close": "그룹 닫기 (공통)",
     "toggle": "그룹 열기/닫기 (같은 태그)",
@@ -44,6 +45,8 @@ ACTIONS = {
     "count_block": "개수 블록 (첫 필드 = 항목 수)",
     "end": "해석 종료",
 }
+
+KEY_ACTIONS = ("value", "const")  # actions whose result can be the key of the next item
 
 ENCODINGS = ["ascii", "utf-8", "cp949", "euc-kr", "latin-1", "cp1252", "utf-16-le", "utf-16-be",
              "shift_jis", "gbk", "big5"]
@@ -106,12 +109,16 @@ class Rule:
     key: bool = False
     # Group rules: "" follows the output option, "lines" one item per line, "inline" one line.
     layout: str = ""
+    # "const" only: text shown for this tag instead of a value read from the data.
+    text: str = ""
 
     def fields_summary(self) -> str:
         s = ", ".join(f.summary() for f in self.fields)
+        if self.action == "const":
+            s = f"= {self.text}" + (f"  (건너뛰기: {s})" if s else "")
         if self.action == "open" and self.end_tag:
             s = f"{s}  닫는 태그 {self.end_tag}".strip()
-        if self.action == "value" and self.key:
+        if self.action in KEY_ACTIONS and self.key:
             s = f"{s}  → 다음 값의 키".strip()
         if self.action != "value" and self.layout:
             s = f"{s}  [{'한 줄로' if self.layout == 'inline' else '줄마다'}]".strip()
@@ -134,6 +141,9 @@ class RuleSet:
     # have `match_pattern` (tag syntax, ?? allowed) at `match_offset`.
     match_pattern: str = ""
     match_offset: int = 0
+    # Groups nested deeper than this stop the decode. A wrong end tag otherwise opens a
+    # new group at every opening tag and the tree (and its indented text) explodes.
+    max_depth: int = 100
 
     def matches(self, data: bytes) -> bool:
         if not self.match_pattern.strip():
@@ -351,6 +361,9 @@ def _pat_at(pat: list[int | None], data: bytes, pos: int, end: int) -> bool:
     return pos + len(pat) <= end and all(b is None or data[pos + i] == b for i, b in enumerate(pat))
 
 
+MAX_NODES = 1_000_000
+
+
 class RuleEngine:
     def __init__(self, ruleset: RuleSet):
         self.rs = ruleset
@@ -409,7 +422,7 @@ class RuleEngine:
                 nxt = e
         return nxt
 
-    def decode(self, data: bytes, max_nodes: int = 2_000_000) -> Node:
+    def decode(self, data: bytes, max_nodes: int = MAX_NODES) -> Node:
         root = Node(0, len(data), GROUP, self.rs.name or "사용자 규칙")
         for e in self.errors:
             root.add(Node(0, 0, ERROR, e))
@@ -493,7 +506,12 @@ class RuleEngine:
                 pos += 1
                 continue
             pos = new
-            if event == "item" and rule.key and rule.action == "value" and not fr.key_pending:
+            if event == "open" and len(stack) - 1 > self.rs.max_depth:
+                stack[-1].node.note = "최대 깊이 초과"
+                fr.node.add(Node(pos, 0, ERROR, f"그룹이 {self.rs.max_depth}단계보다 깊어져 해석을 멈춥니다",
+                                 "그룹을 닫는 태그나 그룹 규칙이 맞는지 확인하세요 (규칙 세트의 '최대 그룹 깊이')"))
+                break
+            if event == "item" and rule.key and rule.action in KEY_ACTIONS and not fr.key_pending:
                 # A key and its value count as one item (count_block).
                 key_nodes.add(id(fr.node.children[-1]))
                 fr.key_pending = True
@@ -509,6 +527,9 @@ class RuleEngine:
             elif event == "end":
                 break
         flush(min(pos, n))
+        if nodes >= max_nodes and pos < n:
+            root.add(Node(pos, 0, ERROR, f"항목이 {max_nodes:,}개를 넘어 해석을 멈춥니다",
+                          "규칙이 너무 잘게 맞고 있지 않은지 확인하세요"))
         if pos < n:
             root.add(self._unknown(data, pos, n, f"{n - pos} byte (해석 중단 이후)"))
         while len(stack) > 1:
@@ -578,6 +599,10 @@ class RuleEngine:
         if a == "value":
             text, _ = self._read_fields(r, rule.fields)
             parent.add(Node(pos, r.pos - pos, VALUE, label, text))
+            return r.pos, "item"
+        if a == "const":
+            self._read_fields(r, rule.fields)  # fields of a const rule are only skipped
+            parent.add(Node(pos, r.pos - pos, VALUE, label, rule.text))
             return r.pos, "item"
         if a == "end":
             parent.add(Node(pos, taglen, INFO, label, "해석 종료"))

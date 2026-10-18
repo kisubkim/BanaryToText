@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..model import ERROR, GROUP, VALUE, Node
-from ..reader import DecodeError, Reader, float_text, hexs, is_printable_text, quote, unpack_float, zigzag
+from ..reader import DecodeError, Reader, float_text, fmt_float, hexs, is_printable_text, quote, unpack_float, zigzag
 from .base import Decoder, Option, new_root, register, run_stream
 
 WIRE = {0: "varint", 1: "i64", 2: "len", 3: "group 시작", 4: "group 끝", 5: "i32"}
@@ -35,7 +35,7 @@ def _message(data: bytes, start: int, end: int, parent: Node, opts: dict, depth:
             b = r.read(8)
             u = int.from_bytes(b, "little")
             parent.add(Node(fpos, r.pos - fpos, VALUE, label,
-                            f"{u}  (double {unpack_float(b, 'little')!r})", note="fixed64"))
+                            f"{u}  (double {fmt_float(unpack_float(b, 'little'))})", note="fixed64"))
         elif wt == 5:
             b = r.read(4)
             u = int.from_bytes(b, "little")

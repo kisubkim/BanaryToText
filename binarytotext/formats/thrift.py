@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..model import GROUP, VALUE, Node
-from ..reader import DecodeError, Reader, bytes_value, unpack_float, zigzag
+from ..reader import DecodeError, Reader, bytes_value, fmt_float, unpack_float, zigzag
 from .base import Decoder, Option, new_root, register, run_stream
 
 MSG_TYPES = {1: "CALL", 2: "REPLY", 3: "EXCEPTION", 4: "ONEWAY"}
@@ -37,7 +37,7 @@ def decode_thrift_binary(data: bytes, opts: dict) -> Node:
         elif t == 3:
             val(str(r.sint(1)))
         elif t == 4:
-            val(repr(r.float(8)))
+            val(fmt_float(r.float(8)))
         elif t == 6:
             val(str(r.sint(2)))
         elif t == 8:
@@ -130,7 +130,7 @@ def decode_thrift_compact(data: bytes, opts: dict) -> Node:
         elif t in (4, 5, 6):
             val(str(zigzag(r.varint())))
         elif t == 7:
-            val(repr(unpack_float(r.read(8), "little")))
+            val(fmt_float(unpack_float(r.read(8), "little")))
         elif t == 8:
             val(bytes_value(r.read(r.varint())))
         elif t == 13:

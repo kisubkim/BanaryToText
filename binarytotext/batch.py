@@ -12,7 +12,8 @@ from typing import Callable
 from . import library, preprocess
 from .formats import REGISTRY
 from .model import compute_stats
-from .render import RenderOptions, render_json, render_text
+from .reader import float_digits
+from .render import RenderOptions, write_json, write_text
 from .rules import RuleEngine, RuleSet
 
 NAME_FIELDS = ("name", "stem", "ext")
@@ -138,11 +139,14 @@ def convert_one(src: Path, rel: Path, st: Settings, entries: list[library.Entry]
     else:
         return Result(src, SKIPPED, message="맞는 규칙 세트가 없고 기본 해석 방식도 없음")
     try:
-        root = RuleEngine(rules).decode(data) if rules is not None else REGISTRY[fmt].decode(data, st.fmt_opts)
-        text = render_json(root) if st.as_json else render_text(root, data, st.render)
+        with float_digits(st.render.float_digits):
+            root = RuleEngine(rules).decode(data) if rules is not None else REGISTRY[fmt].decode(data, st.fmt_opts)
         out = _target(src, rel, st, taken)
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(text, encoding="utf-8")
+        if st.as_json:
+            write_json(out, root)
+        else:
+            write_text(out, root, data, st.render)
     except Exception as e:
         return Result(src, FAILED, method=method, message=f"{type(e).__name__}: {e}")
     s = compute_stats(root, len(data))

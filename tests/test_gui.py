@@ -261,3 +261,64 @@ def test_rule_enable_checkbox_centered(win):
     assert not win.ruleset.rules[0].enabled  # the old left-edge spot is just a row click now
     QTest.mouseClick(t.viewport(), Qt.LeftButton, pos=rect.center())
     assert win.ruleset.rules[0].enabled
+
+
+def test_save_runs_in_background_and_stops_runaway_groups(win, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+
+    from binarytotext.rules import FieldSpec, Rule, RuleSet
+    f, out = tmp_path / "x.bin", tmp_path / "out.txt"
+    f.write_bytes(b"\x0b\x09abc\x00" * 20_000)  # wrong end tag: every 0B nests one level deeper
+    win.ruleset = RuleSet(rules=[Rule("0B", "레코드", "open", bracket="{", end_tag="FF FF"),
+                                 Rule("09", "이름", fields=[FieldSpec("cstring")])], max_depth=30)
+    win._refresh_rule_table()
+    assert win.rs_depth.value() == 30
+    win.open_file(str(f))
+    wait_for(lambda: win.result is not None and "30단계" in win.text.toPlainText())
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(out), ""))
+    win.save_text()
+    assert win.save_job is not None
+    wait_for(lambda: win.save_job is None)
+    assert "30단계" in out.read_text(encoding="utf-8") and "저장:" in win.statusBar().currentMessage()
+    win.save_json()
+    wait_for(lambda: win.save_job is None)
+    assert '"kind": "error"' in out.read_text(encoding="utf-8")
+    win.rs_depth.setValue(12)
+    assert win.ruleset.max_depth == 12
+
+
+def test_rule_dialog_const(win):
+    from binarytotext.gui.rule_dialog import RuleDialog
+    from binarytotext.rules import Rule
+    dlg = RuleDialog(win, Rule("01", "켜짐", "value"), win.ruleset, b"\x01\x01")
+    assert not dlg.const_text.isEnabled()
+    dlg.action.setCurrentIndex(dlg.action.findData("const"))
+    assert dlg.const_text.isEnabled() and dlg.key.isEnabled()
+    dlg.const_text.setText("true")
+    assert dlg.rule.text == "true" and "켜짐: true" in dlg.preview.toPlainText()
+    dlg.action.setCurrentIndex(dlg.action.findData("open"))
+    assert dlg.rule.text == "" and not dlg.key.isEnabled()
+    dlg.close()
+
+
+def test_screen_line_limit_and_float_digits(win, tmp_path):
+    import struct
+    f = tmp_path / "x.bin"
+    f.write_bytes((b"\x04\x01" * 3000) + b"\x05" + struct.pack("<f", 36.6))
+    from binarytotext.rules import FieldSpec, Rule, RuleSet
+    win.ruleset = RuleSet(rules=[Rule("04", "n", fields=[FieldSpec("uint")]),
+                                 Rule("05", "t", fields=[FieldSpec("float", size=4)])])
+    win._refresh_rule_table()
+    win.open_file(str(f))
+    wait_for(lambda: win.result is not None and "t: 36.6" in win.text.toPlainText())
+    win.lines_spin.setValue(1000)
+    wait_for(lambda: "1,000줄에서 잘렸습니다" in win.text.toPlainText())
+    assert len(win.text.toPlainText().splitlines()) == 1001  # 1000 lines + the cut note
+    win.lines_spin.setValue(10_000)
+    win.digits_spin.setValue(9)
+    wait_for(lambda: "t: 36.5999985" in win.text.toPlainText())
+    assert win.digits_spin.text() != "자동" and win._render_opts().float_digits == 9
+    win.digits_spin.setValue(0)
+    assert win.digits_spin.text() == "자동"
+    win.close()
+    assert win.settings.value("max_lines", type=int) == 10_000

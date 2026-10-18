@@ -26,7 +26,8 @@
       "bracket": "[",
       "end_tag": "",
       "key": true,
-      "layout": ""
+      "layout": "",
+      "text": ""
     },
     {
       "tag": "04",
@@ -50,7 +51,8 @@
       "bracket": "[",
       "end_tag": "",
       "key": false,
-      "layout": ""
+      "layout": "",
+      "text": ""
     },
     {
       "tag": "05",
@@ -74,7 +76,8 @@
       "bracket": "[",
       "end_tag": "",
       "key": false,
-      "layout": ""
+      "layout": "",
+      "text": ""
     },
     {
       "tag": "0A",
@@ -86,7 +89,8 @@
       "bracket": "[",
       "end_tag": "",
       "key": false,
-      "layout": ""
+      "layout": "",
+      "text": ""
     },
     {
       "tag": "0B",
@@ -98,7 +102,8 @@
       "bracket": "{",
       "end_tag": "00",
       "key": false,
-      "layout": ""
+      "layout": "",
+      "text": ""
     }
   ],
   "header": [
@@ -116,5 +121,6 @@
   ],
   "footer": [],
   "match_pattern": "'CFG'",
-  "match_offset": 0
+  "match_offset": 0,
+  "max_depth": 100
 }

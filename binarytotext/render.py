@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterator
 
 from .model import ERROR, GROUP, INFO, UNKNOWN, VALUE, Node
 
@@ -24,18 +27,63 @@ class RenderOptions:
     layout: str = "lines"
     commas: bool = False  # "," after every item but the last inside a multi-line group
     quotes: bool = True  # False: strings without quotes (an empty string becomes nothing)
+    # Significant digits of float/double values; 0 = shortest exact form. Applied while
+    # decoding (values are text in the tree): wrap the decode in reader.float_digits().
+    float_digits: int = 0
 
 
 def render_text(root: Node, data: bytes, opts: RenderOptions | None = None,
                 line_nodes: list[Node] | None = None) -> str:
     """line_nodes, if given, receives the node behind each output line."""
-    opts = opts or RenderOptions()
     out: list[str] = []
-
-    def put(n: Node, line: str) -> None:
+    for n, line in iter_lines(root, data, opts):
         out.append(line)
         if line_nodes is not None:
             line_nodes.append(n)
+    return "\n".join(out) + ("\n" if out else "")
+
+
+def write_text(path: str | Path, root: Node, data: bytes, opts: RenderOptions | None = None) -> int:
+    """Stream the text to a file (no giant string in memory). Returns the number of lines."""
+    count = 0
+    with _atomic(path) as f:
+        for _, line in iter_lines(root, data, opts):
+            f.write(line)
+            f.write("\n")
+            count += 1
+    return count
+
+
+def write_json(path: str | Path, root: Node) -> None:
+    with _atomic(path) as f:
+        for chunk in json.JSONEncoder(ensure_ascii=False, indent=2).iterencode(to_dict(root)):
+            f.write(chunk)
+
+
+class _atomic:
+    """Write to "<path>.part" and replace the target only on success: no half-written output."""
+
+    def __init__(self, path: str | Path):
+        self.path = Path(path)
+        self.tmp = self.path.with_name(self.path.name + ".part")
+
+    def __enter__(self):
+        self.f = open(self.tmp, "w", encoding="utf-8")
+        return self.f
+
+    def __exit__(self, exc_type, *_):
+        self.f.close()
+        if exc_type is None:
+            os.replace(self.tmp, self.path)
+        else:
+            self.tmp.unlink(missing_ok=True)
+        return False
+
+
+def iter_lines(root: Node, data: bytes, opts: RenderOptions | None = None) -> Iterator[tuple[Node, str]]:
+    """(node, line) for every output line; stops after opts.max_lines with a note line."""
+    opts = opts or RenderOptions()
+    lines = 0
     width = max(4, len(f"{len(data):X}"))
 
     def prefix(n: Node) -> str:
@@ -108,37 +156,39 @@ def render_text(root: Node, data: bytes, opts: RenderOptions | None = None,
         body = ", ".join(one_line(c, drop) for c in n.children)
         return f"{head + ' ' if head else ''}{_opener(n.close)}{body}{n.close}"
 
-    def emit(n: Node, depth: int, tail: str = "") -> bool:
-        """tail: text right after the item (the separating comma)."""
-        if opts.max_lines and len(out) >= opts.max_lines:
+    def emit(n: Node, depth: int, tail: str = ""):
+        """Yields (node, line); returns False once max_lines is reached. tail: the separating comma."""
+        nonlocal lines
+        if opts.max_lines and lines >= opts.max_lines:
             return False
         pad = opts.indent * depth
         note = f"  ({n.note})" if n.note else ""
+        lines += 1
         if n.kind == GROUP:
             if is_inline(n):
-                put(n, f"{prefix(n)}{pad}{one_line(n)}{tail}{note}")
+                yield n, f"{prefix(n)}{pad}{one_line(n)}{tail}{note}"
                 return True
             head = head_of(n)
             opener = _opener(n.close)
-            put(n, f"{prefix(n)}{pad}{head + ' ' if head else ''}{opener}{'' if n.close else tail}{note}".rstrip())
+            yield n, f"{prefix(n)}{pad}{head + ' ' if head else ''}{opener}{'' if n.close else tail}{note}".rstrip()
             last = len(n.children) - 1
             for i, c in enumerate(n.children):
-                if not emit(c, depth + 1, "," if opts.commas and i < last else ""):
+                if not (yield from emit(c, depth + 1, "," if opts.commas and i < last else "")):
                     return False
             if n.close:
-                put(n, f"{' ' * len(prefix(n))}{pad}{n.close}{tail}")
+                lines += 1
+                yield n, f"{' ' * len(prefix(n))}{pad}{n.close}{tail}"
             return True
-        put(n, f"{prefix(n)}{pad}{leaf_text(n)}{tail}{note}{raw(n)}")
+        yield n, f"{prefix(n)}{pad}{leaf_text(n)}{tail}{note}{raw(n)}"
         for c in n.children:
-            if not emit(c, depth + 1):
+            if not (yield from emit(c, depth + 1)):
                 return False
         return True
 
     for c in root.children:
-        if not emit(c, 0):
-            put(root, f"… 출력이 {opts.max_lines}줄에서 잘렸습니다 (텍스트 저장 시에는 전체가 저장됩니다)")
+        if not (yield from emit(c, 0)):
+            yield root, f"… 출력이 {opts.max_lines:,}줄에서 잘렸습니다 (툴바 '화면 줄 수' 로 늘릴 수 있고, 저장 파일에는 전체가 들어갑니다)"
             break
-    return "\n".join(out) + ("\n" if out else "")
 
 
 _QUOTED = re.compile(r'"((?:[^"\\]|\\.)*)"')

@@ -7,8 +7,9 @@ import copy
 from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox, QLabel, QLineEdit,
                                QPlainTextEdit, QVBoxLayout)
 
+from ..reader import float_digits
 from ..render import RenderOptions, render_text
-from ..rules import ACTIONS, Rule, RuleEngine, RuleSet, parse_tag
+from ..rules import ACTIONS, KEY_ACTIONS, Rule, RuleEngine, RuleSet, parse_tag
 from .field_editor import FieldListEditor, combo, set_combo
 from .hexview import mono_font
 
@@ -50,6 +51,8 @@ class RuleDialog(QDialog):
         self.key.setChecked(self.rule.key)
         self.action_help = QLabel()
         self.action_help.setWordWrap(True)
+        self.const_text = QLineEdit(self.rule.text)
+        self.const_text.setPlaceholderText('예: true   null   "OK"   (태그가 나오면 이 글자를 그대로 출력)')
 
         top = QFormLayout()
         top.addRow("태그 (hex)", self.tag)
@@ -57,6 +60,7 @@ class RuleDialog(QDialog):
         top.addRow("이름 (출력 라벨)", self.name)
         top.addRow("동작", self.action)
         top.addRow("", self.action_help)
+        top.addRow("고정 값", self.const_text)
         top.addRow("키", self.key)
         top.addRow("그룹 괄호", self.bracket)
         top.addRow("그룹 표시", self.layout)
@@ -86,7 +90,7 @@ class RuleDialog(QDialog):
         lay.addWidget(pg)
         lay.addWidget(bb)
 
-        for w in (self.tag, self.name, self.comment, self.end_tag):
+        for w in (self.tag, self.name, self.comment, self.end_tag, self.const_text):
             w.textChanged.connect(self._changed)
         for c in (self.action, self.bracket, self.layout):
             c.currentIndexChanged.connect(self._changed)
@@ -101,8 +105,11 @@ class RuleDialog(QDialog):
         self.rule.bracket = self.bracket.currentData()
         self.rule.comment = self.comment.text()
         self.rule.end_tag = self.end_tag.text().strip()
-        self.key.setEnabled(self.rule.action == "value")
-        self.rule.key = self.key.isChecked() and self.rule.action == "value"
+        self.key.setEnabled(self.rule.action in KEY_ACTIONS)
+        self.rule.key = self.key.isChecked() and self.rule.action in KEY_ACTIONS
+        is_const = self.rule.action == "const"
+        self.const_text.setEnabled(is_const)
+        self.rule.text = self.const_text.text() if is_const else ""
         self.action_help.setText(_ACTION_HELP.get(self.rule.action, ""))
         is_group = self.rule.action in ("open", "toggle", "len_block", "count_block")
         self.bracket.setEnabled(is_group)
@@ -145,7 +152,8 @@ class RuleDialog(QDialog):
                      unknown="hex",
                      rules=[r for r in self.ruleset.rules if r is not self.original] + [self.rule])
         chunk = self.data[pos:pos + 512]
-        root = RuleEngine(rs).decode(chunk)
+        with float_digits(self.render_opts.float_digits):
+            root = RuleEngine(rs).decode(chunk)
         opts = copy.copy(self.render_opts)
         opts.offsets, opts.raw_hex, opts.max_lines = False, False, 6
         text = render_text(root, chunk, opts)
@@ -158,6 +166,8 @@ class RuleDialog(QDialog):
 
 _ACTION_HELP = {
     "value": "태그 다음의 필드들을 읽어 '이름: 값' 한 줄로 출력합니다. 필드가 없으면 이름만 출력(1 byte → 글자 표시 용도).",
+    "const": "태그 다음 byte 를 값으로 읽지 않고, 아래 '고정 값' 글자를 그대로 출력합니다 "
+             "(예: 01 → true, 02 → null). 필드를 넣으면 그만큼 byte 를 건너뜁니다(표시 안 함).",
     "open": "그룹(배열/구조체)을 엽니다. 이후 항목들은 닫는 태그(아래에서 지정) 또는 공통 '그룹 닫기' 규칙이 "
             "나올 때까지 안쪽에 들여쓰기 됩니다.",
     "close": "닫는 태그가 지정되지 않은 그룹 중 가장 안쪽 것을 닫습니다. 그룹마다 닫는 값이 다르면 "

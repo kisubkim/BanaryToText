@@ -14,7 +14,8 @@
       "bracket": "{",
       "end_tag": "00",
       "key": false,
-      "layout": ""
+      "layout": "",
+      "text": ""
     },
     {
       "tag": "09",
@@ -38,7 +39,8 @@
       "bracket": "[",
       "end_tag": "",
       "key": false,
-      "layout": ""
+      "layout": "",
+      "text": ""
     },
     {
       "tag": "04",
@@ -62,7 +64,8 @@
       "bracket": "[",
       "end_tag": "",
       "key": false,
-      "layout": ""
+      "layout": "",
+      "text": ""
     },
     {
       "tag": "05",
@@ -86,7 +89,8 @@
       "bracket": "[",
       "end_tag": "",
       "key": false,
-      "layout": ""
+      "layout": "",
+      "text": ""
     },
     {
       "tag": "06",
@@ -110,7 +114,8 @@
       "bracket": "[",
       "end_tag": "",
       "key": false,
-      "layout": ""
+      "layout": "",
+      "text": ""
     },
     {
       "tag": "0A",
@@ -122,7 +127,8 @@
       "bracket": "[",
       "end_tag": "",
       "key": false,
-      "layout": ""
+      "layout": "",
+      "text": ""
     }
   ],
   "header": [
@@ -174,5 +180,6 @@
     }
   ],
   "match_pattern": "'BDAT'",
-  "match_offset": 0
+  "match_offset": 0,
+  "max_depth": 100
 }

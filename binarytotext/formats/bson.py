@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..model import GROUP, VALUE, Node
-from ..reader import DecodeError, Reader, bytes_value, hexs, quote, unix_time
+from ..reader import DecodeError, Reader, bytes_value, fmt_float, hexs, quote, unix_time
 from .base import Decoder, Option, new_root, register, run_stream
 
 BIN_SUBTYPES = {0: "generic", 1: "function", 2: "binary(old)", 3: "uuid(old)", 4: "uuid", 5: "md5",
@@ -47,7 +47,7 @@ def decode_bson(data: bytes, opts: dict) -> Node:
                 g.add(Node(epos, r.pos - epos, VALUE, name, text, note=note))
 
             if t == 0x01:
-                val(repr(r.float(8, "little")), "double")
+                val(fmt_float(r.float(8, "little")), "double")
             elif t in (0x02, 0x0D, 0x0E):
                 val(quote(string(r)), {2: "string", 0x0D: "javascript", 0x0E: "symbol"}[t])
             elif t in (0x03, 0x04):

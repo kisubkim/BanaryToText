@@ -2,8 +2,24 @@
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import struct
 from datetime import datetime, timezone
+
+# Significant digits for float/double text; 0 = shortest exact form. Context-local, so each
+# decode thread sets its own (see float_digits()).
+_FLOAT_DIGITS: contextvars.ContextVar[int] = contextvars.ContextVar("float_digits", default=0)
+
+
+@contextlib.contextmanager
+def float_digits(n: int):
+    """Decode with floats shown to n significant digits (0 = automatic)."""
+    token = _FLOAT_DIGITS.set(max(0, int(n or 0)))
+    try:
+        yield
+    finally:
+        _FLOAT_DIGITS.reset(token)
 
 
 class DecodeError(Exception):
@@ -93,11 +109,20 @@ def unpack_float(b: bytes, endian: str = "big") -> float:
     raise DecodeError(f"지원하지 않는 float 크기 {len(b)}")
 
 
-def float_text(b: bytes, endian: str = "big") -> str:
-    """Shortest decimal that reads back to the same bytes (36.6, not 36.599998474121094 for float32)."""
-    v = unpack_float(b, endian)
-    if len(b) == 8 or v != v or v in (float("inf"), float("-inf")):
+def fmt_float(v: float) -> str:
+    """A double as text: repr, or the current float_digits() significant digits."""
+    d = _FLOAT_DIGITS.get()
+    if d <= 0 or v != v or v in (float("inf"), float("-inf")):
         return repr(v)
+    return f"{v:.{d}g}"
+
+
+def float_text(b: bytes, endian: str = "big") -> str:
+    """Shortest decimal that reads back to the same bytes (36.6, not 36.599998474121094 for float32),
+    or the current float_digits() significant digits."""
+    v = unpack_float(b, endian)
+    if len(b) == 8 or _FLOAT_DIGITS.get() > 0 or v != v or v in (float("inf"), float("-inf")):
+        return fmt_float(v)
     code = (">" if endian == "big" else "<") + ("e" if len(b) == 2 else "f")
     for digits in range(1, 18):
         s = f"{v:.{digits}g}"

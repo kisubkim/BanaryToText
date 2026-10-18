@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..model import GROUP, VALUE, Node
-from ..reader import DecodeError, Reader, bytes_value, quote, unix_time
+from ..reader import DecodeError, Reader, bytes_value, fmt_float, quote, unix_time
 from .base import Decoder, Option, map_entry, new_root, register, run_stream
 
 
@@ -45,7 +45,7 @@ def decode_msgpack(data: bytes, opts: dict) -> Node:
         if b == 0xCA:
             return val(r.float_text(4), "float32")
         if b == 0xCB:
-            return val(repr(r.float(8)), "float64")
+            return val(fmt_float(r.float(8)), "float64")
         if 0xCC <= b <= 0xCF:
             return val(str(r.uint(1 << (b - 0xCC))), f"uint{8 << (b - 0xCC)}")
         if 0xD0 <= b <= 0xD3:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..model import GROUP, VALUE, Node
-from ..reader import DecodeError, Reader, quote
+from ..reader import DecodeError, Reader, fmt_float, quote
 from .base import Decoder, Option, new_root, register, run_stream
 
 INTS = {b"i": (1, True), b"U": (1, False), b"I": (2, True), b"l": (4, True), b"L": (8, True)}
@@ -47,7 +47,7 @@ def decode_ubjson(data: bytes, opts: dict) -> Node:
         if m == b"d":
             return val(r.float_text(4), "float32")
         if m == b"D":
-            return val(repr(r.float(8)), "float64")
+            return val(fmt_float(r.float(8)), "float64")
         if m == b"H":
             return val(r.read(length(r)).decode("ascii", "replace"), "high-precision")
         if m == b"C":
