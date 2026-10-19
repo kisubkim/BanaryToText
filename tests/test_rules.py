@@ -14,7 +14,7 @@ def text_of(data, rs, offsets=False):
 def test_example_from_request():
     data = b"\x09hello\x00\x04\x2a\x0a\x09ab\x00\x04\x07\x0a"
     out = text_of(data, example_ruleset())
-    assert out == ('문자열: "hello"\n정수: 42\n배열 [\n  문자열: "ab"\n  정수: 7\n]\n')
+    assert out == ('문자열: "hello"\n정수: 42\n배열 [\n  "ab",\n  7\n]\n')  # array: values, commas
 
 
 def test_unknown_runs_and_modes():
@@ -88,7 +88,7 @@ def test_len_block_and_count_block():
     data = b"\xb0\x04\x04\x01\x04\x02" + b"\x04\x09" + b"\xc0\x02\x04\x05\x04\x06\x04\x07"
     out = text_of(data, rs)
     assert out == ("블록 (길이 4) {\n  n: 1\n  n: 2\n}\nn: 9\n"
-                   "목록 (2개) [\n  n: 5\n  n: 6\n]\nn: 7\n")
+                   "목록 (2개) [\n  5,\n  6\n]\nn: 7\n")
 
 
 def test_nested_count_blocks_close_together():
@@ -98,7 +98,7 @@ def test_nested_count_blocks_close_together():
     ])
     data = b"\xc0\x01\xc0\x01\x04\x05\x04\x06"
     out = text_of(data, rs)
-    assert out == "목록 (1개) [\n  목록 (1개) [\n    n: 5\n  ]\n]\nn: 6\n"
+    assert out == "목록 (1개) [\n  (1개) [\n    5\n  ]\n]\nn: 6\n"  # an array inside an array: no name either
 
 
 def test_open_close_and_errors():
@@ -134,14 +134,14 @@ def test_end_tag_closes_its_own_group():
             + b"\x0a\x05" + i(2) + b"\x05" + i(3) + b"\x0a\x00")
     assert text_of(data, _obj_rules()) == (
         '객체 {\n  문자열: "name"\n  객체 {\n    정수: 1\n  }\n'
-        "  배열 [\n    정수: 2\n    정수: 3\n  ]\n}\n")
+        "  배열 [\n    2,\n    3\n  ]\n}\n")
 
 
 def test_end_tag_is_ignored_inside_other_groups_and_outside():
     # 00 inside the 0A array is just an unknown byte; it does not close 0B.
     data = b"\x0b\x0a\x09a\x00\x00\x09b\x00\x0a\x00"
     out = text_of(data, _obj_rules())
-    assert out == '객체 {\n  배열 [\n    문자열: "a"\n    ?? 1 byte: 00  |.|\n    문자열: "b"\n  ]\n}\n'
+    assert out == '객체 {\n  배열 [\n    "a",\n    ?? 1 byte: 00  |.|,\n    "b"\n  ]\n}\n'
     # 00 outside any 0B group (padding) is unknown, not an error.
     out = text_of(b"\x00\x00\x0b\x09a\x00\x00\x00", _obj_rules())
     assert "오류" not in out
@@ -158,7 +158,7 @@ def test_generic_close_skips_groups_with_end_tag():
     rs = _obj_rules()
     rs.rules += [Rule("7B", "블록", "open"), Rule("7D", "블록 끝", "close")]
     out = text_of(b"\x7b\x0b\x09a\x00\x00\x7d", rs)
-    assert out == '블록 [\n  객체 {\n    문자열: "a"\n  }\n]\n'
+    assert out == '블록 [\n  {\n    문자열: "a"\n  }\n]\n'  # an object in an array: no name, its fields keep theirs
 
 
 def test_bad_end_tag_reported():

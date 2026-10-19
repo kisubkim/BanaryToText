@@ -116,7 +116,7 @@ class SaveJob(QThread):
                 root = (RuleEngine(self.ruleset).decode(self.data) if self.mode == RULES_MODE
                         else REGISTRY[self.mode].decode(self.data, self.opts))
             if self.as_json:
-                write_json(self.path, root)
+                write_json(self.path, root, self.ropts)
                 msg = f"저장: {self.path}"
             else:
                 msg = f"저장: {self.path} ({write_text(self.path, root, self.data, self.ropts):,}줄)"
@@ -291,7 +291,8 @@ class MainWindow(QMainWindow):
         self.chk_commas.setChecked(self.settings.value("commas", False, type=bool))
         self.chk_quotes = QCheckBox("따옴표")
         self.chk_quotes.setToolTip("문자열을 \"…\" 로 감싸 표시합니다 (key = \"값\" 포함).\n"
-                                   "끄면 따옴표 없이: 1, 2, abc, , cde (빈 문자열은 비워 둠)")
+                                   "끄면 따옴표 없이: 1, 2, abc, \"\", cde (빈 문자열은 \"\").\n"
+                                   "단 공백이나 , = : ; [ ] { } ( ) < > # 따옴표 \\ 가 든 문자열은 \"…\" 로 남깁니다.")
         self.chk_quotes.setChecked(self.settings.value("quotes", True, type=bool))
         for c in (self.chk_offsets, self.chk_raw, self.chk_labels, self.chk_quotes, self.chk_commas):
             c.toggled.connect(self.schedule)
@@ -312,27 +313,33 @@ class MainWindow(QMainWindow):
         self.digits_spin = QSpinBox()
         self.digits_spin.setRange(0, 17)
         self.digits_spin.setSpecialValueText("자동")
-        self.digits_spin.setSuffix(" 자리")
         self.digits_spin.setToolTip("float/double 값을 몇 자리 유효 숫자로 쓸지. 저장 파일·여러 파일 변환에도 적용됩니다.\n"
                                      "자동 = 값을 정확히 나타내는 가장 짧은 표기 (float32 36.6 → 36.6).\n"
-                                     "예: 3자리 → 3.14, 1.23e+05 / float32 의 실제 값을 보려면 9, double 은 17.")
+                                     "예: 3자리 → 3.14, 123e3 / float32 의 실제 값을 보려면 9, double 은 17.\n"
+                                     "지수는 3의 배수로 씁니다: 12.3e-6, 1.5e3.")
         self.digits_spin.setValue(self.settings.value("float_digits", 0, type=int))
         self.digits_spin.setKeyboardTracking(False)
         self.digits_spin.valueChanged.connect(self.schedule)
         row2.addWidget(self.digits_spin)
-        row2.addSpacing(12)
+        row2.addSpacing(4)
         row2.addWidget(QLabel("화면 줄 수"))
         self.lines_spin = QSpinBox()
         self.lines_spin.setRange(1_000, 10_000_000)
         self.lines_spin.setSingleStep(50_000)
         self.lines_spin.setGroupSeparatorShown(True)
-        self.lines_spin.setSuffix(" 줄")
         self.lines_spin.setToolTip("텍스트 탭에 보여 줄 최대 줄 수. 넘으면 잘라서 보여 줍니다.\n"
                                   "저장 파일에는 항상 전체가 들어갑니다. 크게 하면 화면 표시에 메모리를 더 씁니다.")
         self.lines_spin.setValue(self.settings.value("max_lines", MAX_TEXT_LINES, type=int))
         self.lines_spin.setKeyboardTracking(False)  # re-decode when typing is finished, not per digit
         self.lines_spin.valueChanged.connect(self.schedule)
         row2.addWidget(self.lines_spin)
+        row2.addSpacing(4)
+        self.chk_header_footer = QCheckBox("헤더/꼬리")
+        self.chk_header_footer.setToolTip("규칙 세트의 헤더·꼬리(위치로 읽는 파일 앞뒤 부분)를 출력에 넣을지.\n"
+                                          "화면, 텍스트·JSON 저장, 여러 파일 변환에 똑같이 적용됩니다.")
+        self.chk_header_footer.setChecked(self.settings.value("header_footer", True, type=bool))
+        self.chk_header_footer.toggled.connect(self.schedule)
+        row2.addWidget(self.chk_header_footer)
         row2.addStretch(1)
         return box
 
@@ -741,7 +748,8 @@ class MainWindow(QMainWindow):
         return RenderOptions(offsets=self.chk_offsets.isChecked(), raw_hex=self.chk_raw.isChecked(),
                              labels=self.chk_labels.isChecked(), layout=self.layout_combo.currentData(),
                              commas=self.chk_commas.isChecked(), quotes=self.chk_quotes.isChecked(),
-                             float_digits=self.digits_spin.value())
+                             float_digits=self.digits_spin.value(),
+                             header_footer=self.chk_header_footer.isChecked())
 
     def _current_opts(self) -> dict:
         mode = self.mode.currentData()
@@ -1317,6 +1325,7 @@ class MainWindow(QMainWindow):
         self.settings.setValue("layout", self.layout_combo.currentData())
         self.settings.setValue("float_digits", self.digits_spin.value())
         self.settings.setValue("max_lines", self.lines_spin.value())
+        self.settings.setValue("header_footer", self.chk_header_footer.isChecked())
         self.settings.setValue("ruleset_json", self.ruleset.to_json())
         if self.batch_dlg is not None:
             self.batch_dlg.close()

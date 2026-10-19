@@ -26,10 +26,11 @@ class RenderOptions:
     # on one line, "inline" every group on one line. A group's own Node.layout overrides it.
     layout: str = "lines"
     commas: bool = False  # "," after every item but the last inside a multi-line group
-    quotes: bool = True  # False: strings without quotes (an empty string becomes nothing)
+    quotes: bool = True  # False: strings without quotes, unless empty or holding blanks/special characters
     # Significant digits of float/double values; 0 = shortest exact form. Applied while
     # decoding (values are text in the tree): wrap the decode in reader.float_digits().
     float_digits: int = 0
+    header_footer: bool = True  # False: leave out the rule set's header/footer groups (Node.part)
 
 
 def render_text(root: Node, data: bytes, opts: RenderOptions | None = None,
@@ -54,9 +55,9 @@ def write_text(path: str | Path, root: Node, data: bytes, opts: RenderOptions | 
     return count
 
 
-def write_json(path: str | Path, root: Node) -> None:
+def write_json(path: str | Path, root: Node, opts: RenderOptions | None = None) -> None:
     with _atomic(path) as f:
-        for chunk in json.JSONEncoder(ensure_ascii=False, indent=2).iterencode(to_dict(root)):
+        for chunk in json.JSONEncoder(ensure_ascii=False, indent=2).iterencode(_json_tree(root, opts)):
             f.write(chunk)
 
 
@@ -96,21 +97,14 @@ def iter_lines(root: Node, data: bytes, opts: RenderOptions | None = None) -> It
         more = " …" if n.length > 16 else ""
         return f"    ; {b.hex(' ').upper()}{more}"
 
-    def plain_list(n: Node) -> bool:
-        """Children are leaf values that share one label (or are all keyed): labels add nothing."""
-        kids = n.children
-        return all(c.kind == VALUE and not c.children for c in kids) and (
-            all(c.key for c in kids) or len({c.label for c in kids if not c.key}) <= 1)
-
     def is_inline(n: Node) -> bool:
         if not n.children:
             return False
         mode = n.layout or opts.layout
         if mode == "inline":
             return True
-        # "arrays": the old one-line array rule, only for [ ] lists of plain values.
-        return mode == "arrays" and n.close == "]" and (
-            all(c.kind == VALUE and not c.children for c in n.children) and (not opts.labels or plain_list(n)))
+        # "arrays": value-only groups ([ ] unless the rule says otherwise) of plain values on one line.
+        return mode == "arrays" and n.values_only and all(c.kind == VALUE and not c.children for c in n.children)
 
     def val(n: Node) -> str:
         return n.value if opts.quotes else _strip_quotes(n.value)
@@ -118,16 +112,16 @@ def iter_lines(root: Node, data: bytes, opts: RenderOptions | None = None) -> It
     def key_name(n: Node) -> str:
         if opts.quotes:
             return n.label
-        return "" if n.label == '""' else _unescape(n.label)
+        return n.label if n.label == '""' else _bare(n.label)  # an empty key stays ""
 
     def joined(left: str, sep: str, right: str) -> str:
         return f"{left}{sep} {right}" if right else f"{left}{sep}"  # empty string: nothing after the separator
 
-    def head_of(n: Node) -> str:
+    def head_of(n: Node, drop_label: bool = False) -> str:
         v = val(n)
-        if n.key:
+        if n.key and not drop_label:
             return joined(key_name(n), " =", v)
-        if opts.labels:
+        if opts.labels and not drop_label:
             return n.label + (f" {v}" if v else "")
         return v
 
@@ -139,7 +133,7 @@ def iter_lines(root: Node, data: bytes, opts: RenderOptions | None = None) -> It
         if n.kind == INFO:
             return f"# {n.label}" + (f": {n.value}" if n.value else "")
         v = val(n)
-        if n.key:
+        if n.key and not drop_label:
             return joined(key_name(n), " =", v)
         if n.value == "":  # a value-less rule only has its name to show
             return n.label
@@ -148,16 +142,18 @@ def iter_lines(root: Node, data: bytes, opts: RenderOptions | None = None) -> It
         return joined(n.label, ":", v) if n.label else v
 
     def one_line(n: Node, drop_label: bool = False) -> str:
-        """Whole node (and everything inside) as one piece of text."""
+        """Whole node (and everything inside) as one piece of text. drop_label: an array item."""
         if n.kind != GROUP:
             return leaf_text(n, drop_label)
-        head = head_of(n)
-        drop = n.close == "]" and plain_list(n)  # a list drops repeated labels, an object keeps them
-        body = ", ".join(one_line(c, drop) for c in n.children)
+        head = head_of(n, drop_label)
+        body = ", ".join(one_line(c, n.values_only) for c in n.children)
         return f"{head + ' ' if head else ''}{_opener(n.close)}{body}{n.close}"
 
-    def emit(n: Node, depth: int, tail: str = ""):
-        """Yields (node, line); returns False once max_lines is reached. tail: the separating comma."""
+    def emit(n: Node, depth: int, tail: str = "", item: bool = False):
+        """Yields (node, line); returns False once max_lines is reached.
+
+        tail: the separating comma. item: n is an element of a [ ] array (value only, no name or key).
+        """
         nonlocal lines
         if opts.max_lines and lines >= opts.max_lines:
             return False
@@ -166,43 +162,50 @@ def iter_lines(root: Node, data: bytes, opts: RenderOptions | None = None) -> It
         lines += 1
         if n.kind == GROUP:
             if is_inline(n):
-                yield n, f"{prefix(n)}{pad}{one_line(n)}{tail}{note}"
+                yield n, f"{prefix(n)}{pad}{one_line(n, item)}{tail}{note}"
                 return True
-            head = head_of(n)
+            head = head_of(n, item)
             opener = _opener(n.close)
             yield n, f"{prefix(n)}{pad}{head + ' ' if head else ''}{opener}{'' if n.close else tail}{note}".rstrip()
+            array = n.values_only
             last = len(n.children) - 1
             for i, c in enumerate(n.children):
-                if not (yield from emit(c, depth + 1, "," if opts.commas and i < last else "")):
+                comma = "," if (opts.commas or array) and i < last else ""  # value lists always separate items
+                if not (yield from emit(c, depth + 1, comma, array)):
                     return False
             if n.close:
                 lines += 1
                 yield n, f"{' ' * len(prefix(n))}{pad}{n.close}{tail}"
             return True
-        yield n, f"{prefix(n)}{pad}{leaf_text(n)}{tail}{note}{raw(n)}"
+        yield n, f"{prefix(n)}{pad}{leaf_text(n, item)}{tail}{note}{raw(n)}"
         for c in n.children:
             if not (yield from emit(c, depth + 1)):
                 return False
         return True
 
     for c in root.children:
+        if c.part and not opts.header_footer:
+            continue
         if not (yield from emit(c, 0)):
             yield root, f"… 출력이 {opts.max_lines:,}줄에서 잘렸습니다 (결과 위 '화면 줄 수' 로 늘릴 수 있고, 저장 파일에는 전체가 들어갑니다)"
             break
 
 
 _QUOTED = re.compile(r'"((?:[^"\\]|\\.)*)"')
-_QUOTE_ESCAPE = re.compile(r'\\(["\\])')
+
+# Text that would be ambiguous without quotes: blanks, the output's own separators, quotes and escapes.
+_NEEDS_QUOTES = re.compile(r"""[\s,=:;\[\]{}()<>#"'\\]""")
 
 
-def _unescape(s: str) -> str:
-    """\\" -> " and \\\\ -> \\. Control escapes (\\n, \\t, \\0) stay visible so an item stays on one line."""
-    return _QUOTE_ESCAPE.sub(r"\1", s)
+def _bare(escaped: str) -> str:
+    """Quoted string content -> bare text, or kept in quotes if empty or blanks/special characters make it
+    ambiguous."""
+    return f'"{escaped}"' if not escaped or _NEEDS_QUOTES.search(escaped) else escaped
 
 
 def _strip_quotes(v: str) -> str:
-    """Remove the quotes of every quoted string in a value: '"a", 3, ""' -> 'a, 3, '."""
-    return _QUOTED.sub(lambda m: _unescape(m.group(1)), v)
+    """Drop the quotes of every plain quoted string in a value: '"a", 3, "", "b c"' -> 'a, 3, , "b c"'."""
+    return _QUOTED.sub(lambda m: _bare(m.group(1)), v)
 
 
 def _opener(close: str) -> str:
@@ -222,5 +225,12 @@ def to_dict(n: Node) -> dict:
     return d
 
 
-def render_json(root: Node) -> str:
-    return json.dumps(to_dict(root), ensure_ascii=False, indent=2)
+def _json_tree(root: Node, opts: RenderOptions | None) -> dict:
+    d = to_dict(root)
+    if opts is not None and not opts.header_footer and "children" in d:
+        d["children"] = [cd for c, cd in zip(root.children, d["children"]) if not c.part]
+    return d
+
+
+def render_json(root: Node, opts: RenderOptions | None = None) -> str:
+    return json.dumps(_json_tree(root, opts), ensure_ascii=False, indent=2)

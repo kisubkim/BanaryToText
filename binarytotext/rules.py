@@ -48,6 +48,9 @@ ACTIONS = {
 
 KEY_ACTIONS = ("value", "const")  # actions whose result can be the key of the next item
 
+# Rule.items choices (group rules): how the items inside the group are shown.
+ITEMS = {"": "괄호에 따름", "named": "key = 값", "values": "값만"}
+
 ENCODINGS = ["ascii", "utf-8", "cp949", "euc-kr", "latin-1", "cp1252", "utf-16-le", "utf-16-be",
              "shift_jis", "gbk", "big5"]
 
@@ -111,6 +114,9 @@ class Rule:
     layout: str = ""
     # "const" only: text shown for this tag instead of a value read from the data.
     text: str = ""
+    # Group rules: how items are shown. "" by bracket ([ ] values only, { } key = value),
+    # "named" names and key = value, "values" values only (keys are read as plain values).
+    items: str = ""
 
     def fields_summary(self) -> str:
         s = ", ".join(f.summary() for f in self.fields)
@@ -122,6 +128,8 @@ class Rule:
             s = f"{s}  → 다음 값의 키".strip()
         if self.action != "value" and self.layout:
             s = f"{s}  [{'한 줄로' if self.layout == 'inline' else '줄마다'}]".strip()
+        if self.action not in KEY_ACTIONS and self.items:
+            s = f"{s}  [{ITEMS[self.items]}]".strip()
         return s
 
 
@@ -511,7 +519,8 @@ class RuleEngine:
                 fr.node.add(Node(pos, 0, ERROR, f"그룹이 {self.rs.max_depth}단계보다 깊어져 해석을 멈춥니다",
                                  "그룹을 닫는 태그나 그룹 규칙이 맞는지 확인하세요 (규칙 세트의 '최대 그룹 깊이')"))
                 break
-            if event == "item" and rule.key and rule.action in KEY_ACTIONS and not fr.key_pending:
+            if (event == "item" and rule.key and rule.action in KEY_ACTIONS and not fr.key_pending
+                    and not fr.node.values_only):  # value-only groups (arrays): keys are plain values
                 # A key and its value count as one item (count_block).
                 key_nodes.add(id(fr.node.children[-1]))
                 fr.key_pending = True
@@ -543,7 +552,7 @@ class RuleEngine:
     def _fixed_part(self, root: Node, data: bytes, start: int, end: int,
                     specs: list[FieldSpec], label: str) -> int:
         """Read header/footer fields in order; returns the position after them."""
-        g = root.add(Node(start, 0, GROUP, label, close="}"))
+        g = root.add(Node(start, 0, GROUP, label, close="}", part="header" if label == "헤더" else "footer"))
         r = Reader(data, start, end)
         for i, f in enumerate(specs):
             fpos = r.pos
@@ -614,7 +623,7 @@ class RuleEngine:
             a = "open"
         if a == "open":
             text, _ = self._read_fields(r, rule.fields)
-            g = parent.add(Node(pos, r.pos - pos, GROUP, label, text, close=close, layout=rule.layout))
+            g = parent.add(Node(pos, r.pos - pos, GROUP, label, text, close=close, layout=rule.layout, items=rule.items))
             stack.append(_Frame(g, rule, end_pat=self.end_pats.get(id(rule)) if rule.action == "open" else None))
             return r.pos, "open"
         if a == "close":
@@ -633,7 +642,7 @@ class RuleEngine:
             count = nums[0] or 0
             text, _ = self._read_fields(r, rule.fields[1:])
             desc = (f"(길이 {count})" if a == "len_block" else f"({count}개)") + (f" {text}" if text else "")
-            g = parent.add(Node(pos, r.pos - pos, GROUP, label, desc, close=close, layout=rule.layout))
+            g = parent.add(Node(pos, r.pos - pos, GROUP, label, desc, close=close, layout=rule.layout, items=rule.items))
             if count == 0:
                 return r.pos, "item"
             if a == "len_block":

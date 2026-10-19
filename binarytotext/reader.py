@@ -6,6 +6,7 @@ import contextlib
 import contextvars
 import struct
 from datetime import datetime, timezone
+from decimal import Decimal
 
 # Significant digits for float/double text; 0 = shortest exact form. Context-local, so each
 # decode thread sets its own (see float_digits()).
@@ -109,12 +110,26 @@ def unpack_float(b: bytes, endian: str = "big") -> float:
     raise DecodeError(f"지원하지 않는 float 크기 {len(b)}")
 
 
+def eng(s: str) -> str:
+    """Exponent form in steps of 3, without padding or "+": 1.23e-05 -> 12.3e-6, 1.5e+07 -> 15e6.
+
+    The digits are moved, not recomputed, so the number of significant digits stays the same.
+    """
+    mant, sep, exp = s.partition("e")
+    if not sep:
+        return s
+    e = int(exp)
+    shift = e % 3
+    m = Decimal(mant).scaleb(shift)
+    return f"{m:f}e{e - shift}"
+
+
 def fmt_float(v: float) -> str:
     """A double as text: repr, or the current float_digits() significant digits."""
     d = _FLOAT_DIGITS.get()
-    if d <= 0 or v != v or v in (float("inf"), float("-inf")):
+    if v != v or v in (float("inf"), float("-inf")):
         return repr(v)
-    return f"{v:.{d}g}"
+    return eng(repr(v) if d <= 0 else f"{v:.{d}g}")
 
 
 def float_text(b: bytes, endian: str = "big") -> str:
@@ -127,8 +142,8 @@ def float_text(b: bytes, endian: str = "big") -> str:
     for digits in range(1, 18):
         s = f"{v:.{digits}g}"
         if struct.pack(code, float(s)) == b:
-            return repr(float(s))
-    return repr(v)
+            return eng(repr(float(s)))
+    return eng(repr(v))
 
 
 def hexs(b: bytes, limit: int = 64) -> str:

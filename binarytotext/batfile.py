@@ -97,6 +97,8 @@ def batch_args(spec: BatSpec) -> list[str]:
         a += ["--layout", r.layout]
     if r.float_digits:
         a += ["--float-digits", str(r.float_digits)]
+    if not r.header_footer:
+        a.append("--no-header-footer")
     return a
 
 

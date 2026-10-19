@@ -29,10 +29,19 @@ class Node:
     key: bool = False
     # Groups: "lines" / "inline" overrides the renderer's layout option; "" follows it.
     layout: str = ""
+    # Position-based part of a rule set: "header" / "footer" (can be left out of the output).
+    part: str = ""
+    # Groups: "values" = items are plain values (no names, no key = value, commas),
+    # "named" = items keep names and keys, "" = by bracket ([ ] values, others named).
+    items: str = ""
 
     @property
     def end(self) -> int:
         return self.offset + self.length
+
+    @property
+    def values_only(self) -> bool:
+        return self.items == "values" or (not self.items and self.close == "]")
 
     def add(self, child: "Node") -> "Node":
         self.children.append(child)

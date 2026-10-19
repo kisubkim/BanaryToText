@@ -36,17 +36,18 @@ def test_quotes_option():
     data = (b'\x09a\x00\x09say "hi"\x00' + b"\x09b\x00\x0dx\x00y\x00"
             + b"\x09c\x00\x0a\x09p\x00\x09q\x00\x0a" + b"\x09t\x00\x09l1\nl2\x00")
     on = render(data, rs, layout="arrays").splitlines()
-    assert on == ['a = "say \\"hi\\""', 'b = "x", "y"', 'c = [p = "q"]', 't = "l1\\nl2"']
+    # Inside [ ] the key rule reads plain values: no "p = q" in an array.
+    assert on == ['a = "say \\"hi\\""', 'b = "x", "y"', 'c = ["p", "q"]', 't = "l1\\nl2"']
     off = render(data, rs, layout="arrays", quotes=False).splitlines()
-    # Quotes inside a string come out as plain ", control characters stay escaped (one item per line).
-    assert off == ['a = say "hi"', "b = x, y", "c = [p = q]", "t = l1\\nl2"]
+    # Without quotes, text with blanks, separators, quotes or escapes keeps its quotes.
+    assert off == ['a = "say \\"hi\\""', "b = x, y", "c = [p, q]", 't = "l1\\nl2"']
     # Plain strings and values-only output follow the option too.
     plain = kv_rules()
     plain.rules[0].key = False
     d2 = b"\x0a\x04\x01\x04\x02\x09abc\x00\x09\x00\x09cde\x00\x0a"
-    assert render(d2, plain, labels=False, layout="inline", quotes=False).splitlines() == ["[1, 2, abc, , cde]"]
+    assert render(d2, plain, labels=False, layout="inline", quotes=False).splitlines() == ['[1, 2, abc, "", cde]']
     assert render(d2, plain, labels=False, layout="inline").splitlines() == ['[1, 2, "abc", "", "cde"]']
-    assert render(b"\x09\x00", plain, quotes=False).splitlines() == ["문자열:"]
+    assert render(b"\x09\x00", plain, quotes=False).splitlines() == ['문자열: ""']
 
 
 def test_plain_strings_keep_quotes():
@@ -84,13 +85,12 @@ def test_values_only_and_inline_arrays():
         Rule("FF", "구분선"),
     ])
     data = b"\x0b\x07\x09A\x00\x0a\x04\x15\x04\x16\x0a\x0a\x04\x01\x05\x02\x0a\xff\x00"
+    # Array items are values only, so every [ ] of plain values fits on one line.
     assert render(data, rs, layout="arrays").splitlines() == [
-        "센서 7 {", '  이름: "A"', "  기록 [21, 22]",
-        "  기록 [",  # mixed labels stay one per line while labels are shown
-        "    채널: 1", "    온도: 2", "  ]", "  구분선", "}"]
+        "센서 7 {", '  이름: "A"', "  기록 [21, 22]", "  기록 [1, 2]", "  구분선", "}"]
     assert render(data, rs, labels=False, layout="arrays").splitlines() == [
         "7 {", '  "A"', "  [21, 22]", "  [1, 2]", "  구분선", "}"]
-    assert render(data, rs, labels=False).splitlines()[2:5] == ["  [", "    21", "    22"]
+    assert render(data, rs, labels=False).splitlines()[2:5] == ["  [", "    21,", "    22"]
 
 
 def test_cli_output_flags(tmp_path):
@@ -118,8 +118,11 @@ def sensor_like():
 def test_commas_between_items_not_after_last():
     data, rs = sensor_like()
     assert render(data, rs, commas=True).splitlines() == [
-        "센서 {", '  이름: "A",', "  채널: 1,", "  기록 [", "    채널: 21,", "    채널: 22", "  ]", "}",
+        "센서 {", '  이름: "A",', "  채널: 1,", "  기록 [", "    21,", "    22", "  ]", "}",
         "센서 {", '  이름: "B"', "}"]  # top level has no commas: only items inside a group
+    # Arrays always separate their items, even with the comma option off; objects follow the option.
+    assert render(data, rs).splitlines()[:7] == [
+        "센서 {", '  이름: "A"', "  채널: 1", "  기록 [", "    21,", "    22", "  ]"]
 
 
 def test_inline_groups_and_rule_override():
@@ -163,10 +166,10 @@ def test_empty_strings_stay_visible():
     # Empty value of a key, and the next key still pairs normally.
     data = b"\x09mode\x00\x09\x00\x09ip\x00\x09x\x00"
     assert render(data, kv_rules()).splitlines() == ['mode = ""', 'ip = "x"']
-    assert render(data, kv_rules(), quotes=False).splitlines() == ["mode =", "ip = x"]  # empty: nothing
-    # Empty key: shown as "" rather than the rule name (nothing without quotes).
+    assert render(data, kv_rules(), quotes=False).splitlines() == ['mode = ""', "ip = x"]  # an empty string stays ""
+    # Empty key: shown as "" rather than the rule name, with or without quotes.
     assert render(b"\x09\x00\x04\x1e", kv_rules()).splitlines() == ['"" = 30']
-    assert render(b"\x09\x00\x04\x1e", kv_rules(), quotes=False).splitlines() == [" = 30"]
+    assert render(b"\x09\x00\x04\x1e", kv_rules(), quotes=False).splitlines() == ['"" = 30']
 
 
 def test_cli_no_quotes(tmp_path):
@@ -175,3 +178,70 @@ def test_cli_no_quotes(tmp_path):
     f.write_bytes(b"\x09mode\x00\x09auto\x00")
     assert main(["decode", str(f), "--rules", str(rs_path), "--no-offsets", "--no-quotes", "-o", str(out)]) == 0
     assert out.read_text(encoding="utf-8").splitlines() == ["mode = auto"]
+
+
+
+def test_no_quotes_keeps_quotes_where_needed():
+    plain = kv_rules()
+    plain.rules[0].key = False
+    plain.encoding = "utf-8"
+    data = b"".join(b"\x09" + s.encode("utf-8") + b"\x00" for s in
+                    ["abc", "센서-A_1.5", "a b", "x,y", "k=v", "t:1", "[a]", "it's", ""])
+    out = render(data, plain, labels=False, quotes=False).splitlines()
+    assert out == ["abc", "센서-A_1.5", '"a b"', '"x,y"', '"k=v"', '"t:1"', '"[a]"', "\"it's\"", '""']
+    # Keys follow the same rule.
+    kv = b"\x09my key\x00\x04\x01\x09ok\x00\x04\x02"
+    assert render(kv, kv_rules(), quotes=False).splitlines() == ['"my key" = 1', "ok = 2"]
+
+
+def test_arrays_hold_values_only():
+    # A key rule inside [ ] reads plain values; the array never shows names, and always has commas.
+    data = b"\x09list\x00\x0a\x09a\x00\x04\x01\x09b\x00\x04\x02\x0a\x09n\x00\x04\x03"
+    assert render(data, kv_rules()).splitlines() == [
+        "list = [", '  "a",', "  1,", '  "b",', "  2", "]", "n = 3"]
+    assert render(data, kv_rules(), layout="inline", quotes=False).splitlines() == ["list = [a, 1, b, 2]", "n = 3"]
+    # An object inside an array: no name of its own, its fields keep theirs.
+    obj = b"\x0a\x0b\x09k\x00\x04\x05\x00\x0a"
+    assert render(obj, kv_rules()).splitlines() == ["배열 [", "  {", "    k = 5", "  }", "]"]
+
+
+def header_rules() -> RuleSet:
+    return RuleSet(rules=[Rule("04", "n", fields=[FieldSpec("uint", size=1)])],
+                   header=[FieldSpec("fstring", "매직", size=2)], footer=[FieldSpec("uint", "crc", size=1)])
+
+
+def test_header_footer_option(tmp_path):
+    data = b"MG\x04\x01\x04\x02\x99"
+    rs = header_rules()
+    full = render(data, rs).splitlines()
+    assert full[0] == "헤더 {" and full[-3] == "꼬리 {"
+    assert render(data, rs, header_footer=False).splitlines() == ["n: 1", "n: 2"]
+    root = decode_with_rules(data, rs)
+    assert '"매직"' not in render_json(root, RenderOptions(header_footer=False))
+    assert '"매직"' in render_json(root)
+    f, rp, out = tmp_path / "x.bin", tmp_path / "r.json", tmp_path / "o.txt"
+    f.write_bytes(data)
+    rs.save(rp)
+    assert main(["decode", str(f), "--rules", str(rp), "--no-offsets", "--no-header-footer", "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == "n: 1\nn: 2\n"
+    assert main(["decode", str(f), "--rules", str(rp), "--json", "--no-header-footer", "-o", str(out)]) == 0
+    assert "crc" not in out.read_text(encoding="utf-8")
+
+
+
+def test_group_items_choice_per_rule():
+    # Same data, three choices on the 0A array rule: by bracket ([ ] values), named, values.
+    data = b"\x0a\x09a\x00\x04\x01\x09b\x00\x04\x02\x0a"
+    rs = kv_rules()
+    assert render(data, rs).splitlines() == ["배열 [", '  "a",', "  1,", '  "b",', "  2", "]"]
+    rs.rules[2].items = "named"  # keys pair up even inside [ ]
+    assert render(data, rs).splitlines() == ["배열 [", "  a = 1", "  b = 2", "]"]
+    assert render(data, rs, commas=True, layout="inline").splitlines() == ["배열 [a = 1, b = 2]"]
+    # An object set to values only: no keys, no names, commas.
+    obj = b"\x0b\x09k\x00\x04\x05\x04\x06\x00"
+    rs = kv_rules()
+    assert render(obj, rs).splitlines() == ["객체 {", "  k = 5", "  정수: 6", "}"]
+    rs.rules[3].items = "values"
+    assert render(obj, rs).splitlines() == ["객체 {", '  "k",', "  5,", "  6", "}"]
+    assert rs.rules[3].fields_summary().endswith("[값만]")
+    assert RuleSet.from_dict(__import__("json").loads(rs.to_json())).rules[3].items == "values"

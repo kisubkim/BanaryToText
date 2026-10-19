@@ -144,7 +144,7 @@ def convert_one(src: Path, rel: Path, st: Settings, entries: list[library.Entry]
         out = _target(src, rel, st, taken)
         out.parent.mkdir(parents=True, exist_ok=True)
         if st.as_json:
-            write_json(out, root)
+            write_json(out, root, st.render)
         else:
             write_text(out, root, data, st.render)
     except Exception as e:

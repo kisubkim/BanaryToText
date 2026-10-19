@@ -353,3 +353,30 @@ def test_make_bat(win, tmp_path, monkeypatch):
     dlg.input.setText("")
     assert "%*" in dlg.preview.toPlainText() and dlg.save_btn.isEnabled()
     dlg.close()
+
+
+def test_header_footer_checkbox(win, tmp_path):
+    from binarytotext.rules import FieldSpec, Rule, RuleSet
+    f = tmp_path / "x.bin"
+    f.write_bytes(b"MG\x04\x01\x99")
+    win.ruleset = RuleSet(rules=[Rule("04", "n", fields=[FieldSpec("uint")])],
+                          header=[FieldSpec("fstring", "magic", size=2)], footer=[FieldSpec("uint", "crc")])
+    win._refresh_rule_table()
+    win.open_file(str(f))
+    wait_for(lambda: win.result is not None and "magic" in win.text.toPlainText())
+    win.chk_header_footer.setChecked(False)
+    wait_for(lambda: "magic" not in win.text.toPlainText() and "n: 1" in win.text.toPlainText())
+    assert "crc" not in win.text.toPlainText() and not win._render_opts().header_footer
+
+
+
+def test_rule_dialog_group_items(win):
+    from binarytotext.gui.rule_dialog import RuleDialog
+    from binarytotext.rules import Rule
+    dlg = RuleDialog(win, Rule("0A", "배열", "toggle"), win.ruleset, b"\x0a\x09a\x00\x04\x01\x0a")
+    assert dlg.items.isEnabled() and dlg.rule.items == ""
+    dlg.items.setCurrentIndex(dlg.items.findData("named"))
+    assert dlg.rule.items == "named"
+    dlg.action.setCurrentIndex(dlg.action.findData("value"))
+    assert not dlg.items.isEnabled() and dlg.rule.items == ""
+    dlg.close()

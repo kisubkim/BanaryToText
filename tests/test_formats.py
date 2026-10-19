@@ -37,7 +37,7 @@ def test_cbor_containers():
     data = bytes.fromhex("a26161016162820203")
     root, text = run("cbor", data)
     clean(root, data)
-    assert "a: 1" in text and "b (2개) [" in text and "[1]: 3" in text
+    assert "a: 1" in text and "b (2개) [" in text and "    3\n" in text  # array items: values only
 
 
 def test_cbor_indefinite():
@@ -53,7 +53,7 @@ def test_msgpack_map():
     root, text = run("msgpack", data)
     clean(root, data)
     assert "compact: true" in text and "schema: 0" in text
-    assert "[1]: 256" in text and "[2]: -128" in text
+    assert "  256,  (uint16)" in text and "  -128  (int8)" in text
 
 
 def test_msgpack_timestamp():
@@ -154,14 +154,14 @@ def test_ubjson():
     data = b"{i\x01ai\x01i\x01b[$i#i\x03\x01\x02\x03}"
     root, text = run("ubjson", data)
     clean(root, data)
-    assert "a: 1" in text and "[2]: 3" in text
+    assert "a: 1" in text and "  3  (i)" in text
 
 
 def test_bencode():
     data = b"d3:foo3:bar4:listli1ei-2ee3:numi42ee"
     root, text = run("bencode", data)
     clean(root, data)
-    assert 'foo: "bar"' in text and "num: 42" in text and "[1]: -2" in text
+    assert 'foo: "bar"' in text and "num: 42" in text and "  -2  (int)" in text
 
 
 def test_thrift_binary():

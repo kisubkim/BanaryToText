@@ -167,3 +167,18 @@ def test_cli_float_digits(tmp_path):
     d = tmp_path / "out"
     assert main(["batch", str(f), "--rules", str(rp), "-d", str(d), "--no-offsets", "--float-digits", "2"]) == 0
     assert [p.read_text(encoding="utf-8") for p in d.iterdir()] == ["d: 0.67\n"]
+
+
+
+def test_exponents_in_steps_of_three():
+    import struct
+
+    from binarytotext.reader import eng, float_digits, float_text, fmt_float
+    assert [eng(s) for s in ("1.23e-05", "1.5e+07", "1e+20", "-4.56e-07", "2.5e-10", "1.23e+03", "36.6")] == [
+        "12.3e-6", "15e6", "100e18", "-456e-9", "250e-12", "1.23e3", "36.6"]
+    assert fmt_float(1.234e-5) == "12.34e-6" and fmt_float(1e22) == "10e21"  # automatic mode too
+    with float_digits(3):
+        assert [fmt_float(v) for v in (0.001234, 0.00001234, 1234.5, 123456.7)] == [
+            "0.00123", "12.3e-6", "1.23e3", "123e3"]
+        assert float_text(struct.pack("<f", 1.5e-7), "little") == "150e-9"
+    assert float_text(struct.pack("<f", 1.5e-7), "little") == "150e-9"

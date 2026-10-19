@@ -92,3 +92,7 @@ def test_generated_bat_really_runs(tmp_path):
     assert r.returncode == 0 and (out / "b_drop.txt").read_text(encoding="utf-8") == "n: 8\n"
     r = subprocess.run(["cmd", "/c", str(bat)], capture_output=True, timeout=60, input=b"\r\n")
     assert r.returncode == 1
+
+
+def test_header_footer_flag():
+    assert batch_args(BatSpec(rules="r.json", render=RenderOptions(header_footer=False)))[-1] == "--no-header-footer"

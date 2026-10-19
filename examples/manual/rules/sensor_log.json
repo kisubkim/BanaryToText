@@ -15,7 +15,8 @@
       "end_tag": "00",
       "key": false,
       "layout": "",
-      "text": ""
+      "text": "",
+      "items": ""
     },
     {
       "tag": "09",
@@ -40,7 +41,8 @@
       "end_tag": "",
       "key": false,
       "layout": "",
-      "text": ""
+      "text": "",
+      "items": ""
     },
     {
       "tag": "04",
@@ -65,7 +67,8 @@
       "end_tag": "",
       "key": false,
       "layout": "",
-      "text": ""
+      "text": "",
+      "items": ""
     },
     {
       "tag": "05",
@@ -90,7 +93,8 @@
       "end_tag": "",
       "key": false,
       "layout": "",
-      "text": ""
+      "text": "",
+      "items": ""
     },
     {
       "tag": "06",
@@ -115,7 +119,8 @@
       "end_tag": "",
       "key": false,
       "layout": "",
-      "text": ""
+      "text": "",
+      "items": ""
     },
     {
       "tag": "0A",
@@ -128,7 +133,8 @@
       "end_tag": "",
       "key": false,
       "layout": "",
-      "text": ""
+      "text": "",
+      "items": ""
     }
   ],
   "header": [
