@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import datetime as _dt
 import re
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -121,7 +120,12 @@ def bat_text(spec: BatSpec) -> str:
     inputs = " ".join(quote(i) for i in spec.inputs) if spec.inputs else "%*"
     line = " ".join(cmd + ["batch", inputs] + [quote(x) for x in batch_args(spec)])
     stamp = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    # The file is UTF-8: switch the console to code page 65001 before any non-ASCII line and
+    # put the caller's code page back on every exit, so it works from any terminal.
+    restore = "chcp %BTT_CP% >nul"
     out = ["@echo off", "setlocal",
+           "for /f \"tokens=2 delims=:.\" %%c in ('chcp') do set \"BTT_CP=%%c\"",
+           "chcp 65001 >nul",
            f"rem BinaryToText {__version__} 에서 만든 변환 스크립트 ({stamp})"]
     if spec.description:
         out.append(f"rem 해석 방식: {spec.description}")
@@ -130,6 +134,7 @@ def bat_text(spec: BatSpec) -> str:
         out += ['if "%~1"=="" (',
                 "  echo 변환할 파일이나 폴더를 이 bat 파일에 끌어다 놓으세요.",
                 "  pause",
+                f"  {restore}",
                 "  exit /b 1",
                 ")"]
     if spec.python and not spec.btt and not spec.btt_beside:
@@ -138,32 +143,10 @@ def bat_text(spec: BatSpec) -> str:
     out.append("if not %ERR%==0 echo 일부 파일을 건너뛰었거나 변환하지 못했습니다 (종료 코드 %ERR%).")
     if spec.pause:
         out.append("pause")
-    out.append("exit /b %ERR%")
+    out += [restore, "exit /b %ERR%"]
     return "\r\n".join(out) + "\r\n"
 
 
-def console_encoding() -> str:
-    """cmd.exe reads a .bat in the console (OEM) code page: cp949 on Korean Windows."""
-    if sys.platform == "win32":
-        try:
-            import ctypes
-            return f"cp{ctypes.windll.kernel32.GetOEMCP()}"
-        except Exception:
-            pass
-    return "utf-8"
-
-
-def write_bat(path: str | Path, text: str, encoding: str | None = None) -> str:
-    """Save in the console code page; if a path in it can't be encoded there, UTF-8 + chcp 65001.
-
-    Returns the encoding used.
-    """
-    enc = encoding or console_encoding()
-    try:
-        data = text.encode(enc)
-    except (UnicodeEncodeError, LookupError):
-        enc = "utf-8"
-        head, _, rest = text.partition("\r\n")
-        data = (head + "\r\nchcp 65001 >nul\r\n" + rest).encode(enc)
-    Path(path).write_bytes(data)
-    return enc
+def write_bat(path: str | Path, text: str) -> None:
+    """UTF-8 without BOM (cmd.exe would try to run a BOM as a command); the text switches to chcp 65001."""
+    Path(path).write_bytes(text.encode("utf-8"))

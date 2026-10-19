@@ -60,13 +60,17 @@ def test_check():
 
 def test_write_bat_encoding(tmp_path):
     p = tmp_path / "a.bat"
-    text = bat_text(BatSpec(btt="btt.exe", rules=r"C:\규칙\r.json"))
-    assert write_bat(p, text, "cp949") == "cp949"
-    assert p.read_bytes().decode("cp949") == text
-    # A path the console code page can't hold: UTF-8 and switch the console first.
-    text = bat_text(BatSpec(btt="btt.exe", rules="C:\\ルール\\r.json"))
-    assert write_bat(p, text, "cp949") == "utf-8"
-    assert p.read_bytes().decode("utf-8").split("\r\n")[1] == "chcp 65001 >nul"
+    text = bat_text(BatSpec(btt="btt.exe", rules="C:\\규칙\\ルール\\r.json", pause=False))
+    write_bat(p, text)
+    raw = p.read_bytes()
+    assert not raw.startswith(b"\xef\xbb\xbf") and raw.decode("utf-8") == text  # UTF-8, no BOM
+    lines = text.split("\r\n")
+    # Everything before the switch to UTF-8 is ASCII; every exit puts the caller's code page back.
+    switch = lines.index("chcp 65001 >nul")
+    assert all(ln.isascii() for ln in lines[:switch]) and "BTT_CP" in lines[switch - 1]
+    assert lines[-3:] == ["chcp %BTT_CP% >nul", "exit /b %ERR%", ""]
+    drop = bat_text(BatSpec(btt="btt.exe", rules="r.json")).split("\r\n")
+    assert drop[drop.index("  exit /b 1") - 1] == "  chcp %BTT_CP% >nul"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="runs cmd.exe")
@@ -81,11 +85,16 @@ def test_generated_bat_really_runs(tmp_path):
     base = dict(python=sys.executable, source_dir=str(ROOT), rules=str(rules), out_dir=str(out), include="*.bin",
                 pause=False, render=RenderOptions(offsets=False))
     bat = tmp_path / "변환.bat"
-    write_bat(bat, bat_text(BatSpec(inputs=[str(data)], **base)))
-    r = subprocess.run(["cmd", "/c", str(bat)], capture_output=True, timeout=120)
-    assert r.returncode == 0, r.stderr.decode(errors="replace")
-    assert (out / "a.bin.txt").read_text(encoding="utf-8") == 's: "hi"\nn: 7\n'
-    assert (out / "b.bin.txt").exists()
+    write_bat(bat, bat_text(BatSpec(inputs=[str(data)], overwrite=True, **base)))
+    # Korean console (949) and a UTF-8 terminal (65001), each in its own hidden console;
+    # the trailing chcp shows the caller's code page is back afterwards.
+    for cp in (949, 65001):
+        r = subprocess.run(f'cmd /c "chcp {cp} >nul & call "{bat}" & chcp"', capture_output=True, timeout=120,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+        assert r.returncode == 0, r.stderr.decode(errors="replace")
+        assert r.stdout.decode(errors="replace").strip().endswith(str(cp))
+        assert (out / "a.bin.txt").read_text(encoding="utf-8") == 's: "hi"\nn: 7\n'
+        assert (out / "b.bin.txt").exists()
     # Drop mode: the files come in as arguments; nothing dropped -> exit code 1 with a hint.
     write_bat(bat, bat_text(BatSpec(**{**base, "pattern": "{stem}_drop.txt"})))
     r = subprocess.run(["cmd", "/c", str(bat), str(data / "b.bin")], capture_output=True, timeout=120)

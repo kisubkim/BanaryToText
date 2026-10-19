@@ -196,6 +196,30 @@ py -3.12 -m venv .venv
    (아래 라이선스 참고). 릴리스 노트에 zip 의 SHA-256 을 적어 두면 받은 사람이 확인할 수 있습니다:
    `Get-FileHash dist\BinaryToText-<버전>-win64.zip -Algorithm SHA256`
 
+### 코드 서명 (Windows "인식할 수 없는 앱" 경고)
+
+인터넷에서 받은 서명 없는 exe 는 Windows SmartScreen 이 "Windows의 PC 보호" 경고를 띄우고, 백신도 평판이 없는 파일로
+더 의심합니다. 이 경고는 **신뢰된 인증 기관의 코드 서명 인증서로 서명해야** 없어집니다(서명한 뒤에도 다운로드가 쌓여
+평판이 생길 때까지 잠시 경고가 남을 수 있습니다). 자체 서명 인증서는 다른 PC 에서 효과가 없습니다.
+
+`build.ps1` 은 인증서가 있으면 exe 를 자동으로 서명합니다(SHA-256 + 타임스탬프, Windows SDK 의 `signtool`).
+
+| 환경 변수 | 뜻 |
+|---|---|
+| `BTT_SIGN_THUMBPRINT` | Windows 인증서 저장소(또는 하드웨어 토큰)에 있는 인증서의 지문 |
+| `BTT_SIGN_PFX`, `BTT_SIGN_PASSWORD` | 또는 PFX 파일과 비밀번호 |
+| `BTT_SIGN_TIMESTAMP` | 타임스탬프 서버 (기본 `http://timestamp.digicert.com`) |
+
+설정이 없으면 서명 없이 빌드하고, 빌드 끝에 각 exe 의 서명 상태와 `BUILD_INFO.txt` 의 "코드 서명" 줄로 알려 줍니다.
+서명 여부와 상관없이 exe 에는 버전 정보(제품명, 버전, 저작권)를 넣고 UPX 압축은 쓰지 않습니다(백신 오탐 줄이기).
+
+인증서를 얻는 방법:
+
+- **SignPath Foundation** (오픈 소스 무료): OSI 라이선스(MIT 해당), 공개 저장소, 무료 배포가 조건이며 빌드를 GitHub Actions
+  같은 CI 에서 해야 하고 저장소에 "Code signing policy" 를 공개해야 합니다. 신청은 저장소 관리자가 합니다.
+- **인증 기관의 코드 서명 인증서**(OV): 개인 명의도 가능하지만 유료이고, 개인 키는 하드웨어 토큰에 보관해야 합니다.
+- **Microsoft Artifact Signing**(월 약 $9.99): 개인은 미국·캐나다 거주자만 신청할 수 있습니다.
+
 ## 라이선스
 
 이 저장소의 소스 코드는 MIT 라이선스입니다 (`LICENSE`).

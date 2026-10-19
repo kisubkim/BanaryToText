@@ -204,10 +204,10 @@ class BatDialog(QDialog):
         if not p:
             return None
         path = Path(p)
-        enc = batfile.write_bat(path, batfile.bat_text(s))
+        batfile.write_bat(path, batfile.bat_text(s))
         self.saved_path = path
         self._remember(path)
-        self.msg.setText(f"저장했습니다: {path}  ({enc})")
+        self.msg.setText(f"저장했습니다: {path}")
         return path
 
     def _remember(self, path: Path) -> None:
