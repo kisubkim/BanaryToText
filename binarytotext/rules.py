@@ -50,6 +50,8 @@ KEY_ACTIONS = ("value", "const")  # actions whose result can be the key of the n
 
 # Rule.items choices (group rules): how the items inside the group are shown.
 ITEMS = {"": "괄호에 따름", "named": "key = 값", "values": "값만"}
+# Rule.commas choices (group rules).
+COMMAS = {"": "자동", "on": "쉼표", "off": "쉼표 없음"}
 
 ENCODINGS = ["ascii", "utf-8", "cp949", "euc-kr", "latin-1", "cp1252", "utf-16-le", "utf-16-be",
              "shift_jis", "gbk", "big5"]
@@ -117,6 +119,9 @@ class Rule:
     # Group rules: how items are shown. "" by bracket ([ ] values only, { } key = value),
     # "named" names and key = value, "values" values only (keys are read as plain values).
     items: str = ""
+    # Group rules: commas between items. "" automatic (value lists and one-line groups always,
+    # otherwise the output option), "on" always, "off" never.
+    commas: str = ""
 
     def fields_summary(self) -> str:
         s = ", ".join(f.summary() for f in self.fields)
@@ -130,6 +135,8 @@ class Rule:
             s = f"{s}  [{'한 줄로' if self.layout == 'inline' else '줄마다'}]".strip()
         if self.action not in KEY_ACTIONS and self.items:
             s = f"{s}  [{ITEMS[self.items]}]".strip()
+        if self.action not in KEY_ACTIONS and self.commas:
+            s = f"{s}  [{COMMAS[self.commas]}]".strip()
         return s
 
 
@@ -623,7 +630,8 @@ class RuleEngine:
             a = "open"
         if a == "open":
             text, _ = self._read_fields(r, rule.fields)
-            g = parent.add(Node(pos, r.pos - pos, GROUP, label, text, close=close, layout=rule.layout, items=rule.items))
+            g = parent.add(Node(pos, r.pos - pos, GROUP, label, text, close=close, layout=rule.layout, items=rule.items,
+                                commas=rule.commas))
             stack.append(_Frame(g, rule, end_pat=self.end_pats.get(id(rule)) if rule.action == "open" else None))
             return r.pos, "open"
         if a == "close":
@@ -642,7 +650,8 @@ class RuleEngine:
             count = nums[0] or 0
             text, _ = self._read_fields(r, rule.fields[1:])
             desc = (f"(길이 {count})" if a == "len_block" else f"({count}개)") + (f" {text}" if text else "")
-            g = parent.add(Node(pos, r.pos - pos, GROUP, label, desc, close=close, layout=rule.layout, items=rule.items))
+            g = parent.add(Node(pos, r.pos - pos, GROUP, label, desc, close=close, layout=rule.layout, items=rule.items,
+                                commas=rule.commas))
             if count == 0:
                 return r.pos, "item"
             if a == "len_block":

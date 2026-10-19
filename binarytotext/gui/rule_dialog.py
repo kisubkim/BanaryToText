@@ -43,6 +43,12 @@ class RuleDialog(QDialog):
                             ("named", "key = 값 / 이름: 값  (이름과 키를 표시)"),
                             ("values", "값만 쉼표로 나열  (이름·키 없이)")])
         set_combo(self.items, self.rule.items)
+        self.commas = combo([("", "자동  (값만 그룹·한 줄 그룹은 항상, 나머지는 출력 설정의 '쉼표')"),
+                             ("on", "넣음  (항목 사이에 항상 쉼표)"),
+                             ("off", "안 넣음  (출력 설정과 상관없이 쉼표 없음)")])
+        set_combo(self.commas, self.rule.commas)
+        self.commas.setToolTip("이 그룹 항목 사이의 쉼표. 마지막 항목 뒤에는 붙지 않습니다.\n"
+                               "안 넣음 + 한 줄로 = [21 22 24] 처럼 공백으로만 구분합니다.")
         self.items.setToolTip("그룹 안 항목을 어떻게 쓸지.\n"
                               "key = 값: 키 규칙이 다음 값의 이름이 되고, 규칙 이름도 표시합니다.\n"
                               "값만: 키 규칙도 평범한 값으로 읽고, 항목을 항상 쉼표로 구분합니다.")
@@ -72,6 +78,7 @@ class RuleDialog(QDialog):
         top.addRow("그룹 괄호", self.bracket)
         top.addRow("그룹 표시", self.layout)
         top.addRow("그룹 항목", self.items)
+        top.addRow("쉼표", self.commas)
         top.addRow("닫는 태그 (hex)", self.end_tag)
         top.addRow("", self.end_msg)
         top.addRow("메모", self.comment)
@@ -100,7 +107,7 @@ class RuleDialog(QDialog):
 
         for w in (self.tag, self.name, self.comment, self.end_tag, self.const_text):
             w.textChanged.connect(self._changed)
-        for c in (self.action, self.bracket, self.layout, self.items):
+        for c in (self.action, self.bracket, self.layout, self.items, self.commas):
             c.currentIndexChanged.connect(self._changed)
         self.key.toggled.connect(self._changed)
         self.fields_editor.changed.connect(self._changed)
@@ -125,6 +132,8 @@ class RuleDialog(QDialog):
         self.rule.layout = self.layout.currentData() if is_group else ""
         self.items.setEnabled(is_group)
         self.rule.items = self.items.currentData() if is_group else ""
+        self.commas.setEnabled(is_group)
+        self.rule.commas = self.commas.currentData() if is_group else ""
         is_open = self.rule.action == "open"
         self.end_tag.setEnabled(is_open)
         end_ok = True

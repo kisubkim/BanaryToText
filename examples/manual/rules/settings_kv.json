@@ -28,7 +28,8 @@
       "key": true,
       "layout": "",
       "text": "",
-      "items": ""
+      "items": "",
+      "commas": ""
     },
     {
       "tag": "04",
@@ -54,7 +55,8 @@
       "key": false,
       "layout": "",
       "text": "",
-      "items": ""
+      "items": "",
+      "commas": ""
     },
     {
       "tag": "05",
@@ -80,7 +82,8 @@
       "key": false,
       "layout": "",
       "text": "",
-      "items": ""
+      "items": "",
+      "commas": ""
     },
     {
       "tag": "0A",
@@ -94,7 +97,8 @@
       "key": false,
       "layout": "",
       "text": "",
-      "items": ""
+      "items": "",
+      "commas": ""
     },
     {
       "tag": "0B",
@@ -108,7 +112,8 @@
       "key": false,
       "layout": "",
       "text": "",
-      "items": ""
+      "items": "",
+      "commas": ""
     }
   ],
   "header": [

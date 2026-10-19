@@ -286,8 +286,9 @@ class MainWindow(QMainWindow):
                                    "파일에서 읽은 키(key = 값)는 그대로 남습니다.")
         self.chk_labels.setChecked(self.settings.value("labels", True, type=bool))
         self.chk_commas = QCheckBox("쉼표")
-        self.chk_commas.setToolTip("그룹 안의 항목 뒤에 쉼표를 붙입니다 (마지막 항목 제외).\n"
-                                   "한 줄로 이어 쓰는 그룹은 항상 쉼표로 구분합니다.")
+        self.chk_commas.setToolTip("그룹 안의 항목 뒤에 쉼표를 붙입니다 (마지막 항목 제외, 맨 바깥 줄 제외).\n"
+                                   "배열 [ ] 처럼 값만 쓰는 그룹과 한 줄로 쓰는 그룹은 이 체크와 상관없이 항상 쉼표입니다.\n"
+                                   "그룹 규칙의 '쉼표'(넣음 / 안 넣음)를 정하면 그 그룹은 규칙을 따릅니다.")
         self.chk_commas.setChecked(self.settings.value("commas", False, type=bool))
         self.chk_quotes = QCheckBox("따옴표")
         self.chk_quotes.setToolTip("문자열을 \"…\" 로 감싸 표시합니다 (key = \"값\" 포함).\n"

@@ -34,6 +34,8 @@ class Node:
     # Groups: "values" = items are plain values (no names, no key = value, commas),
     # "named" = items keep names and keys, "" = by bracket ([ ] values, others named).
     items: str = ""
+    # Groups: "on" / "off" = commas between items regardless of the option, "" = automatic.
+    commas: str = ""
 
     @property
     def end(self) -> int:

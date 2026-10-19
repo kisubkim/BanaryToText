@@ -380,3 +380,16 @@ def test_rule_dialog_group_items(win):
     dlg.action.setCurrentIndex(dlg.action.findData("value"))
     assert not dlg.items.isEnabled() and dlg.rule.items == ""
     dlg.close()
+
+
+
+def test_rule_dialog_commas(win):
+    from binarytotext.gui.rule_dialog import RuleDialog
+    arr = next(r for r in win.ruleset.rules if r.tag == "0A")  # the example set's own 0A array rule
+    dlg = RuleDialog(win, arr, win.ruleset, b"\x0a\x04\x01\x04\x02\x0a")
+    assert dlg.commas.isEnabled() and dlg.rule.commas == ""
+    dlg.commas.setCurrentIndex(dlg.commas.findData("off"))
+    assert dlg.rule.commas == "off" and "," not in dlg.preview.toPlainText().split("\n", 1)[1]
+    dlg.action.setCurrentIndex(dlg.action.findData("value"))
+    assert not dlg.commas.isEnabled() and dlg.rule.commas == ""
+    dlg.close()

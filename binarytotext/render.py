@@ -146,8 +146,15 @@ def iter_lines(root: Node, data: bytes, opts: RenderOptions | None = None) -> It
         if n.kind != GROUP:
             return leaf_text(n, drop_label)
         head = head_of(n, drop_label)
-        body = ", ".join(one_line(c, n.values_only) for c in n.children)
+        sep = " " if n.commas == "off" else ", "  # one line: commas unless the rule turns them off
+        body = sep.join(one_line(c, n.values_only) for c in n.children)
         return f"{head + ' ' if head else ''}{_opener(n.close)}{body}{n.close}"
+
+    def commas_in(n: Node) -> bool:
+        """Commas between the items of a multi-line group: the rule's choice, else value lists always."""
+        if n.commas:
+            return n.commas == "on"
+        return opts.commas or n.values_only
 
     def emit(n: Node, depth: int, tail: str = "", item: bool = False):
         """Yields (node, line); returns False once max_lines is reached.
@@ -167,11 +174,10 @@ def iter_lines(root: Node, data: bytes, opts: RenderOptions | None = None) -> It
             head = head_of(n, item)
             opener = _opener(n.close)
             yield n, f"{prefix(n)}{pad}{head + ' ' if head else ''}{opener}{'' if n.close else tail}{note}".rstrip()
-            array = n.values_only
+            array, commas = n.values_only, commas_in(n)
             last = len(n.children) - 1
             for i, c in enumerate(n.children):
-                comma = "," if (opts.commas or array) and i < last else ""  # value lists always separate items
-                if not (yield from emit(c, depth + 1, comma, array)):
+                if not (yield from emit(c, depth + 1, "," if commas and i < last else "", array)):
                     return False
             if n.close:
                 lines += 1

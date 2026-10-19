@@ -245,3 +245,19 @@ def test_group_items_choice_per_rule():
     assert render(obj, rs).splitlines() == ["객체 {", '  "k",', "  5,", "  6", "}"]
     assert rs.rules[3].fields_summary().endswith("[값만]")
     assert RuleSet.from_dict(__import__("json").loads(rs.to_json())).rules[3].items == "values"
+
+
+
+def test_group_commas_choice_per_rule():
+    data, rs = sensor_like()
+    # Automatic: the object follows the option, the [ ] list always has commas.
+    assert render(data, rs).splitlines()[:7] == [
+        "센서 {", '  이름: "A"', "  채널: 1", "  기록 [", "    21,", "    22", "  ]"]
+    rs.rules[3].commas = "off"  # the array: no commas, even on one line
+    assert render(data, rs, commas=True).splitlines()[:7] == [
+        "센서 {", '  이름: "A",', "  채널: 1,", "  기록 [", "    21", "    22", "  ]"]
+    assert render(data, rs, layout="arrays").splitlines()[3] == "  기록 [21 22]"
+    rs.rules[0].commas = "on"  # the object: always, even with the option off
+    assert render(data, rs).splitlines()[:3] == ["센서 {", '  이름: "A",', "  채널: 1,"]
+    assert rs.rules[0].fields_summary().endswith("[쉼표]") and rs.rules[3].fields_summary().endswith("[쉼표 없음]")
+    assert RuleSet.from_dict(__import__("json").loads(rs.to_json())).rules[3].commas == "off"
