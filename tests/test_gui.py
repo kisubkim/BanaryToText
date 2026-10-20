@@ -393,3 +393,22 @@ def test_rule_dialog_commas(win):
     dlg.action.setCurrentIndex(dlg.action.findData("value"))
     assert not dlg.commas.isEnabled() and dlg.rule.commas == ""
     dlg.close()
+
+
+def test_finished_jobs_are_released(win, tmp_path):
+    import gc
+
+    from binarytotext.gui.main_window import DecodeJob
+    f = tmp_path / "x.bin"
+    f.write_bytes(b"\x09hello\x00\x04\x2a\x0a\x09ab\x00\x0a")
+    win.open_file(str(f))
+    wait_for(lambda: win.result is not None and not win.jobs)
+    win.rule_table.selectRow(0)
+    for d in (1, -1) * 5:  # moving rules re-decodes every time
+        win.move_rule(d)
+        win.decode()
+        wait_for(lambda: not win.jobs)
+    for _ in range(5):
+        QApplication.instance().processEvents()  # run the deleteLater calls
+    gc.collect()
+    assert sum(isinstance(o, DecodeJob) for o in gc.get_objects()) == 0

@@ -111,17 +111,23 @@ def unpack_float(b: bytes, endian: str = "big") -> float:
 
 
 def eng(s: str) -> str:
-    """Exponent form in steps of 3, without padding or "+": 1.23e-05 -> 12.3e-6, 1.5e+07 -> 15e6.
+    """Float text with a 1-3 digit integer part: plain for 1 <= |x| < 1000, otherwise an exponent
+    in steps of 3 without padding or "+" (1234.5 -> 1.2345e3, 0.5 -> 500e-3, 1.23e-05 -> 12.3e-6).
+    Zero and whole numbers keep a ".0" so they read as floats (0 -> 0.0, 30 -> 30.0).
 
     The digits are moved, not recomputed, so the number of significant digits stays the same.
     """
-    mant, sep, exp = s.partition("e")
-    if not sep:
+    d = Decimal(s)
+    if not d.is_finite():
         return s
-    e = int(exp)
-    shift = e % 3
-    m = Decimal(mant).scaleb(shift)
-    return f"{m:f}e{e - shift}"
+    if d.is_zero():
+        return "-0.0" if d.is_signed() else "0.0"
+    d = d.normalize()  # repr's trailing ".0" is not a significant digit: 1000.0 -> 1e3, not 1.0000e3
+    e = d.adjusted() - d.adjusted() % 3  # exponent of the leading digit, rounded down to a multiple of 3
+    m = f"{d.scaleb(-e):f}"
+    if e == 0 and "." not in m:
+        m += ".0"
+    return m if e == 0 else f"{m}e{e}"
 
 
 def fmt_float(v: float) -> str:

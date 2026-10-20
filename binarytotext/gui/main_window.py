@@ -317,7 +317,7 @@ class MainWindow(QMainWindow):
         self.digits_spin.setToolTip("float/double 값을 몇 자리 유효 숫자로 쓸지. 저장 파일·여러 파일 변환에도 적용됩니다.\n"
                                      "자동 = 값을 정확히 나타내는 가장 짧은 표기 (float32 36.6 → 36.6).\n"
                                      "예: 3자리 → 3.14, 123e3 / float32 의 실제 값을 보려면 9, double 은 17.\n"
-                                     "지수는 3의 배수로 씁니다: 12.3e-6, 1.5e3.")
+                                     "정수 부분은 1~3자리: 그 밖은 3의 배수 지수로 씁니다 (1.2345e3, 500e-3). 0 은 0.0.")
         self.digits_spin.setValue(self.settings.value("float_digits", 0, type=int))
         self.digits_spin.setKeyboardTracking(False)
         self.digits_spin.valueChanged.connect(self.schedule)
@@ -674,11 +674,9 @@ class MainWindow(QMainWindow):
         job = SaveJob(p, self.data, mode, copy.deepcopy(self.ruleset), dict(self._current_opts()),
                       self._render_opts(), as_json)
         job.done.connect(self._on_saved)
-        job.finished.connect(lambda j=job: self.jobs.remove(j) if j in self.jobs else None)
-        self.jobs.append(job)
         self.save_job = job
         self.statusBar().showMessage(f"저장 중… {p}")
-        job.start()
+        self._start_job(job)
         return job
 
     def _on_saved(self, ok: bool, msg: str) -> None:
@@ -745,6 +743,22 @@ class MainWindow(QMainWindow):
         return dlg
 
     # ------------------------------------------------------------ decode
+    def _start_job(self, job: QThread) -> None:
+        """Run a worker thread; when it finishes, forget it and let Qt delete it.
+
+        No lambda capturing the job: that reference cycle (job -> connection -> lambda -> job)
+        kept every finished thread, and its rule set copy, alive.
+        """
+        self.jobs.append(job)
+        job.finished.connect(self._job_finished)
+        job.start()
+
+    def _job_finished(self) -> None:
+        job = self.sender()
+        if job in self.jobs:
+            self.jobs.remove(job)
+        job.deleteLater()
+
     def _render_opts(self) -> RenderOptions:
         return RenderOptions(offsets=self.chk_offsets.isChecked(), raw_hex=self.chk_raw.isChecked(),
                              labels=self.chk_labels.isChecked(), layout=self.layout_combo.currentData(),
@@ -768,10 +782,8 @@ class MainWindow(QMainWindow):
         job = DecodeJob(self.gen, self.data, mode, copy.deepcopy(self.ruleset), dict(self._current_opts()),
                         self._render_opts(), self.lines_spin.value())
         job.done.connect(self._on_decoded)
-        job.finished.connect(lambda j=job: self.jobs.remove(j) if j in self.jobs else None)
-        self.jobs.append(job)
         self.stats_label.setText("해석 중…")
-        job.start()
+        self._start_job(job)
 
     def _on_decoded(self, gen: int, res: dict) -> None:
         if gen != self.gen:
@@ -1224,9 +1236,7 @@ class MainWindow(QMainWindow):
         self.an_status.setText("분석 중… (모든 내장 포맷을 시도합니다)")
         job = AnalyzeJob(self.data)
         job.done.connect(self._on_analyzed)
-        job.finished.connect(lambda j=job: self.jobs.remove(j) if j in self.jobs else None)
-        self.jobs.append(job)
-        job.start()
+        self._start_job(job)
 
     def _on_analyzed(self, rep) -> None:
         if isinstance(rep, str):
