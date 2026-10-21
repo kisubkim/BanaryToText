@@ -316,8 +316,8 @@ class MainWindow(QMainWindow):
         self.digits_spin.setSpecialValueText("자동")
         self.digits_spin.setToolTip("float/double 값을 몇 자리 유효 숫자로 쓸지. 저장 파일·여러 파일 변환에도 적용됩니다.\n"
                                      "자동 = 값을 정확히 나타내는 가장 짧은 표기 (float32 36.6 → 36.6).\n"
-                                     "예: 3자리 → 3.14, 123e3 / float32 의 실제 값을 보려면 9, double 은 17.\n"
-                                     "정수 부분은 1~3자리: 그 밖은 3의 배수 지수로 씁니다 (1.2345e3, 500e-3). 0 은 0.0.")
+                                     "예: 3자리 → 3.14, 123.0e3, 2.675 → 2.68 (보이는 10진수를 사사오입).\n"
+                                     "0.001 이상 1000 미만은 그대로, 그 밖은 3의 배수 지수 (1.2345e3, 12.34e-6). 항상 소수점: 0.0, 30.0.")
         self.digits_spin.setValue(self.settings.value("float_digits", 0, type=int))
         self.digits_spin.setKeyboardTracking(False)
         self.digits_spin.valueChanged.connect(self.schedule)

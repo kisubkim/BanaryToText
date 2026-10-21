@@ -306,9 +306,9 @@ def test_float_text_shortest_round_trip():
 
     from binarytotext.reader import float_text
     assert float_text(struct.pack("<f", 36.6), "little") == "36.6"
-    assert float_text(struct.pack(">f", 0.1)) == "100e-3"  # below 1: e in steps of 3
+    assert float_text(struct.pack(">f", 0.1)) == "0.1"
     assert float_text(struct.pack(">e", 1.5)) == "1.5"
-    assert float_text(struct.pack(">d", 0.1)) == "100e-3"
+    assert float_text(struct.pack(">d", 0.1)) == "0.1"
     assert float_text(struct.pack(">f", 0.0)) == "0.0"
     assert float_text(struct.pack(">f", float("inf"))) == "inf"
     x = struct.unpack(">f", bytes.fromhex("3F800001"))[0]  # needs all 9 digits

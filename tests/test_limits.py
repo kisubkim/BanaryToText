@@ -133,12 +133,11 @@ def test_float_digits():
     def values(n):
         with float_digits(n):
             return [c.value for c in decode_with_rules(data, float_rules()).children]
-    # Integer part kept to 1-3 digits: below 1 the value moves into an e-3 step.
-    assert values(0) == ["36.6", "333.3333333333333e-3"]  # automatic: shortest exact form
-    assert values(3) == ["36.6", "333e-3"]
-    assert values(9) == ["36.5999985", "333.333333e-3"]  # float32's real value shows up
-    assert values(2) == ["37.0", "330e-3"]  # a whole number keeps ".0"
-    assert values(0) == ["36.6", "333.3333333333333e-3"]  # the setting does not leak
+    assert values(0) == ["36.6", "0.3333333333333333"]  # automatic: shortest exact form
+    assert values(3) == ["36.6", "0.333"]
+    assert values(9) == ["36.6", "0.333333333"]  # rounded from the shown decimal, not the binary value
+    assert values(2) == ["37.0", "0.33"]  # a whole number keeps ".0"
+    assert values(0) == ["36.6", "0.3333333333333333"]  # the setting does not leak
 
 
 def test_float_digits_in_formats_and_threads():
@@ -164,10 +163,10 @@ def test_cli_float_digits(tmp_path):
     f.write_bytes(b"\x06" + struct.pack("<d", 2 / 3))
     float_rules().save(rp)
     assert main(["decode", str(f), "--rules", str(rp), "--no-offsets", "--float-digits", "4", "-o", str(out)]) == 0
-    assert out.read_text(encoding="utf-8") == "d: 666.7e-3\n"
+    assert out.read_text(encoding="utf-8") == "d: 0.6667\n"
     d = tmp_path / "out"
     assert main(["batch", str(f), "--rules", str(rp), "-d", str(d), "--no-offsets", "--float-digits", "2"]) == 0
-    assert [p.read_text(encoding="utf-8") for p in d.iterdir()] == ["d: 670e-3\n"]
+    assert [p.read_text(encoding="utf-8") for p in d.iterdir()] == ["d: 0.67\n"]
 
 
 
@@ -176,16 +175,29 @@ def test_exponents_in_steps_of_three():
 
     from binarytotext.reader import eng, float_digits, float_text, fmt_float
     assert [eng(s) for s in ("1.23e-05", "1.5e+07", "1e+20", "-4.56e-07", "2.5e-10", "1.23e+03", "36.6")] == [
-        "12.3e-6", "15e6", "100e18", "-456e-9", "250e-12", "1.23e3", "36.6"]
-    # Integer part 1-3 digits: 1 <= |x| < 1000 plain, otherwise e in steps of 3.
-    assert [eng(s) for s in ("999.9", "1000.0", "1234.5", "0.5", "0.001234", "100", "12.50")] == [
-        "999.9", "1e3", "1.2345e3", "500e-3", "1.234e-3", "100.0", "12.5"]
-    # Zero and whole numbers keep ".0".
-    assert [eng(s) for s in ("0", "0.0", "-0.0", "30")] == ["0.0", "0.0", "-0.0", "30.0"]
-    assert fmt_float(1.234e-5) == "12.34e-6" and fmt_float(1e22) == "10e21"  # automatic mode too
+        "12.3e-6", "15.0e6", "100.0e18", "-456.0e-9", "250.0e-12", "1.23e3", "36.6"]
+    # Plain for 0.001 <= |x| < 1000, otherwise e in steps of 3 with a 1-3 digit integer part.
+    assert [eng(s) for s in ("999.9", "1000.0", "1234.5", "0.5", "0.1", "0.001234", "0.001", "0.0009")] == [
+        "999.9", "1.0e3", "1.2345e3", "0.5", "0.1", "0.001234", "0.001", "900.0e-6"]
+    # Every number shows a decimal point, also whole numbers and exponent forms.
+    assert [eng(s) for s in ("0", "0.0", "-0.0", "30", "100", "12.50")] == [
+        "0.0", "0.0", "-0.0", "30.0", "100.0", "12.5"]
+    assert fmt_float(1.234e-5) == "12.34e-6" and fmt_float(1e22) == "10.0e21"  # automatic mode too
     with float_digits(3):
-        assert [fmt_float(v) for v in (0.001234, 0.00001234, 1234.5, 123456.7, 0.0, 30.0)] == [
-            "1.23e-3", "12.3e-6", "1.23e3", "123e3", "0.0", "30.0"]
+        assert [fmt_float(v) for v in (0.001234, 0.00001234, 1234.5, 123456.7, 0.0, 30.0, 0.5)] == [
+            "0.00123", "12.3e-6", "1.23e3", "123.0e3", "0.0", "30.0", "0.5"]
         assert float_text(struct.pack("<f", 0.0), "little") == "0.0"
-        assert float_text(struct.pack("<f", 1.5e-7), "little") == "150e-9"
-    assert float_text(struct.pack("<f", 1.5e-7), "little") == "150e-9"
+        assert float_text(struct.pack("<f", 1.5e-7), "little") == "150.0e-9"
+    assert float_text(struct.pack("<f", 1.5e-7), "little") == "150.0e-9"
+
+
+def test_significant_digits_round_half_up_on_the_shown_decimal():
+    from binarytotext.reader import float_digits, fmt_float, round_sig
+    # The binary values sit just below the halfway point (2.67499999...), the shown decimals do not.
+    with float_digits(3):
+        assert [fmt_float(v) for v in (2.675, 1.005, 1.45)] == ["2.68", "1.01", "1.45"]
+    with float_digits(2):
+        assert [fmt_float(v) for v in (0.125, 0.375, 1.45, -2.675)] == ["0.13", "0.38", "1.5", "-2.7"]
+    with float_digits(1):
+        assert [fmt_float(v) for v in (2.5, 3.5, 0.05)] == ["3.0", "4.0", "0.05"]
+    assert round_sig("123456.7", 3) == "1.23E+5" and round_sig("0", 3) == "0"

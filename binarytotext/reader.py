@@ -6,7 +6,7 @@ import contextlib
 import contextvars
 import struct
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 # Significant digits for float/double text; 0 = shortest exact form. Context-local, so each
 # decode thread sets its own (see float_digits()).
@@ -111,9 +111,9 @@ def unpack_float(b: bytes, endian: str = "big") -> float:
 
 
 def eng(s: str) -> str:
-    """Float text with a 1-3 digit integer part: plain for 1 <= |x| < 1000, otherwise an exponent
-    in steps of 3 without padding or "+" (1234.5 -> 1.2345e3, 0.5 -> 500e-3, 1.23e-05 -> 12.3e-6).
-    Zero and whole numbers keep a ".0" so they read as floats (0 -> 0.0, 30 -> 30.0).
+    """Float text: plain for 0.001 <= |x| < 1000 (0.5, 36.6, 999.9), otherwise an exponent in steps
+    of 3 with a 1-3 digit integer part, without padding or "+" (1234.5 -> 1.2345e3, 0.00001234 -> 12.34e-6).
+    A number always shows a decimal point so it reads as a float: 0.0, 30.0, 1.0e3.
 
     The digits are moved, not recomputed, so the number of significant digits stays the same.
     """
@@ -122,34 +122,49 @@ def eng(s: str) -> str:
         return s
     if d.is_zero():
         return "-0.0" if d.is_signed() else "0.0"
-    d = d.normalize()  # repr's trailing ".0" is not a significant digit: 1000.0 -> 1e3, not 1.0000e3
-    e = d.adjusted() - d.adjusted() % 3  # exponent of the leading digit, rounded down to a multiple of 3
+    d = d.normalize()  # repr's trailing ".0" is not a significant digit: 1000.0 -> 1.0e3, not 1.0000e3
+    lead = d.adjusted()  # exponent of the leading digit
+    e = 0 if -3 <= lead < 3 else lead - lead % 3
     m = f"{d.scaleb(-e):f}"
-    if e == 0 and "." not in m:
+    if "." not in m:
         m += ".0"
     return m if e == 0 else f"{m}e{e}"
 
 
-def fmt_float(v: float) -> str:
-    """A double as text: repr, or the current float_digits() significant digits."""
+def round_sig(s: str, digits: int) -> str:
+    """Round decimal text to `digits` significant digits, half up on the decimal digits shown
+    (2.675 -> 2.68, 0.125 -> 0.13), not on the binary value behind them (which would give 2.67)."""
+    d = Decimal(s)
+    if not d.is_finite() or d.is_zero():
+        return s
+    return str(d.quantize(Decimal(1).scaleb(d.adjusted() - digits + 1), rounding=ROUND_HALF_UP))
+
+
+def _finish(shortest: str) -> str:
+    """Shortest round-trip text -> displayed text: rounded to float_digits() if set, then laid out by eng()."""
     d = _FLOAT_DIGITS.get()
+    return eng(round_sig(shortest, d) if d > 0 else shortest)
+
+
+def fmt_float(v: float) -> str:
+    """A double as text: the shortest decimal that reads back to it (repr), or float_digits() digits."""
     if v != v or v in (float("inf"), float("-inf")):
         return repr(v)
-    return eng(repr(v) if d <= 0 else f"{v:.{d}g}")
+    return _finish(repr(v))
 
 
 def float_text(b: bytes, endian: str = "big") -> str:
     """Shortest decimal that reads back to the same bytes (36.6, not 36.599998474121094 for float32),
-    or the current float_digits() significant digits."""
+    or the current float_digits() significant digits rounded from that decimal."""
     v = unpack_float(b, endian)
-    if len(b) == 8 or _FLOAT_DIGITS.get() > 0 or v != v or v in (float("inf"), float("-inf")):
+    if len(b) == 8 or v != v or v in (float("inf"), float("-inf")):
         return fmt_float(v)
     code = (">" if endian == "big" else "<") + ("e" if len(b) == 2 else "f")
     for digits in range(1, 18):
         s = f"{v:.{digits}g}"
         if struct.pack(code, float(s)) == b:
-            return eng(repr(float(s)))
-    return eng(repr(v))
+            return _finish(repr(float(s)))
+    return _finish(repr(v))
 
 
 def hexs(b: bytes, limit: int = 64) -> str:

@@ -315,9 +315,9 @@ def test_screen_line_limit_and_float_digits(win, tmp_path):
     wait_for(lambda: "1,000줄에서 잘렸습니다" in win.text.toPlainText())
     assert len(win.text.toPlainText().splitlines()) == 1001  # 1000 lines + the cut note
     win.lines_spin.setValue(10_000)
-    win.digits_spin.setValue(9)
-    wait_for(lambda: "t: 36.5999985" in win.text.toPlainText())
-    assert win.digits_spin.text() != "자동" and win._render_opts().float_digits == 9
+    win.digits_spin.setValue(2)
+    wait_for(lambda: "t: 37.0" in win.text.toPlainText())
+    assert win.digits_spin.text() != "자동" and win._render_opts().float_digits == 2
     win.digits_spin.setValue(0)
     assert win.digits_spin.text() == "자동"
     win.close()
