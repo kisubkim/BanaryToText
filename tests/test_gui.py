@@ -412,3 +412,20 @@ def test_finished_jobs_are_released(win, tmp_path):
         QApplication.instance().processEvents()  # run the deleteLater calls
     gc.collect()
     assert sum(isinstance(o, DecodeJob) for o in gc.get_objects()) == 0
+
+
+def test_one_decode_at_a_time(win, tmp_path):
+    import struct
+    f = tmp_path / "x.bin"
+    f.write_bytes(b"\x05" + struct.pack("<f", 36.6))
+    from binarytotext.rules import FieldSpec, Rule, RuleSet
+    win.ruleset = RuleSet(rules=[Rule("05", "t", fields=[FieldSpec("float", size=4)])])
+    win._refresh_rule_table()
+    win.open_file(str(f))
+    wait_for(lambda: win.result is not None and not win.jobs)
+    for d in (2, 3, 9):  # quick changes: overlapping decodes used to pile up whole trees in memory
+        win.digits_spin.setValue(d)
+        win.decode()
+        assert sum(type(j).__name__ == "DecodeJob" for j in win.jobs) <= 1
+    wait_for(lambda: not win.jobs and win.decode_job is None)
+    assert "t: 36.5999985" in win.text.toPlainText()  # the last setting (9 digits) wins

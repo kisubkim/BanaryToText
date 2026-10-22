@@ -198,6 +198,8 @@ class MainWindow(QMainWindow):
         self.report = None
         self.batch_dlg: BatchDialog | None = None
         self.save_job: SaveJob | None = None
+        self.decode_job: DecodeJob | None = None
+        self._decode_again = False  # settings changed while a decode was running
         self.theme = apply_theme(QApplication.instance(), self.settings.value("theme", DEFAULT_THEME))
 
         self.setWindowTitle(f"BinaryToText {__version__}")
@@ -316,8 +318,8 @@ class MainWindow(QMainWindow):
         self.digits_spin.setSpecialValueText("자동")
         self.digits_spin.setToolTip("float/double 값을 몇 자리 유효 숫자로 쓸지. 저장 파일·여러 파일 변환에도 적용됩니다.\n"
                                      "자동 = 값을 정확히 나타내는 가장 짧은 표기 (float32 36.6 → 36.6).\n"
-                                     "예: 3자리 → 3.14, 123.0e3, 2.675 → 2.68 (보이는 10진수를 사사오입).\n"
-                                     "0.001 이상 1000 미만은 그대로, 그 밖은 3의 배수 지수 (1.2345e3, 12.34e-6). 항상 소수점: 0.0, 30.0.")
+                                     "예: 3자리 → 3.14, 1.23e3 / float32 36.6 을 9자리로 → 36.5999985 (저장된 값 기준 반올림).\n"
+                                     "자릿수 안에 들어가면 그대로, 아니면 3의 배수 지수 (1.23e3, 12.3e-6). 항상 소수점: 0.0, 30.0.")
         self.digits_spin.setValue(self.settings.value("float_digits", 0, type=int))
         self.digits_spin.setKeyboardTracking(False)
         self.digits_spin.valueChanged.connect(self.schedule)
@@ -778,12 +780,25 @@ class MainWindow(QMainWindow):
     def decode(self) -> None:
         self.decode_timer.stop()
         self.gen += 1
+        self.stats_label.setText("해석 중…")
+        if self.decode_job is not None:
+            # One decode at a time: each builds a whole tree, and overlapping ones (quick clicks on a
+            # large file) multiply the memory. The running one's result is now stale; decode again after it.
+            self._decode_again = True
+            return
         mode = self.mode.currentData()
         job = DecodeJob(self.gen, self.data, mode, copy.deepcopy(self.ruleset), dict(self._current_opts()),
                         self._render_opts(), self.lines_spin.value())
         job.done.connect(self._on_decoded)
-        self.stats_label.setText("해석 중…")
+        job.finished.connect(self._decode_finished)
+        self.decode_job = job
         self._start_job(job)
+
+    def _decode_finished(self) -> None:
+        self.decode_job = None
+        if self._decode_again:
+            self._decode_again = False
+            self.decode()
 
     def _on_decoded(self, gen: int, res: dict) -> None:
         if gen != self.gen:
